@@ -11,3 +11,68 @@
 - 高 DPI 下绘制、点击、拖动必须共用坐标换算。状态图标静置卡顿曾来自粗粒度计时和主线程重复磁盘扫描；缓存只作显示提示，启用素材前仍完整校验。
 - 发布前确认 GitHub 副本与本地源版本一致，完整包、程序包和校验清单全部准备好再公开。不要把运行时数据库、账号凭据、日志或角色动画写入 Git 历史。
 - 公开版本只按 GitHub 上一稳定版进位；本机 v1.0.4 与公开 v1.0.0 分离。仅卡片发布用仓库内 tools/pyinstaller_keep_files.py，不能依赖本机未跟踪的 本地实装 辅助脚本。构建输出要使用全新路径；完整包、程序更新包、仅卡片包和独立轻量资源分别验 SHA 后再发布。
+
+## Linux 隔离最小验证（2026-10-25）
+
+- `tools/linux_probe.py` 复用原 GUI 与 IPC 解析器；运行方法及证据边界见 `docs/LINUX_VALIDATION.md`。Python 3.12 虚拟环境在 `.venv`，状态和素材在 Git 忽略的 `work/linux-validation`。
+- 原生 Wayland 下 Qt 的 `move()` 可改变应用内部坐标，而 niri 实际窗口位置不变；不能用 QWidget.geometry() 单独验证桌宠移动和气泡定位。
+- XWayland 的工具窗口未出现在本机 niri windows 列表；Qt 坐标变化及 ABOVE 属性均不足以证明实际定位、层级和拖动通过。用户确认显示基本正常但拖动异常，尚未区分后端验收。
+- IPC 两次订阅收到真实工作中状态，28 项既有状态解析测试通过；真实完成/审批/压缩及 Windows 无回归仍未验收。
+
+
+### Linux 探针真实数据接入（2026-10-25）
+
+PyCharm 配置已启用 `--live`。Linux 专用适配集中在 tools/linux_live.py 与 tools/linux_codex_readonly，未修改 app 生产模块。实际使用 Unix IPC、会话日志、只读 SQLite 和沙箱化的账户额度 RPC；桌宠状态在 work/linux-validation/state-live，演示状态独立。bwrap 使用临时 Codex home 加只读 config/auth 挂载；仅根目录只读会使当前 CLI 初始化失败，因此必须为运行时数据库保留临时可写空间。不得降级为无沙箱查询。
+
+40 秒 offscreen 测试确认 IPC、额度查询和 Token 统计可用，28 个既有测试通过；保护文件前后内容一致。会话额度会按原规则覆盖较旧接口额度，界面来源不一定一直显示接口。GTK color-mix 来自系统 GTK 3 CSS，探针只清空本进程主题桥接，Qt 仍为 Fusion。需用户停止旧 PyCharm 实例后重启；拖动、完整状态转换和跨平台视觉一致性仍待验收。详情见 docs/LINUX_VALIDATION.md。
+
+
+### niri 原生拖动与透明画布（2026-10-25）
+
+用户人工确认最终一轮拖动、持续拎起动画、松手后气泡定位正常，矩形边框消失。PyCharm 改为 `gui --backend wayland --niri --live --manual --seconds 3600`，适配仅在 tools/linux_niri.py，未编辑 app 生产源码。XWayland 诊断抓到虚拟全局坐标反馈累加；原生移动采用 startSystemMove，气泡依据 niri WindowLayoutsChanged 的实际坐标定位。MoveFloatingWindow 的 SetFixed 基于工作区原点，不能直接传 Qt/IPC 的屏幕坐标；当前使用实际坐标差 AdjustFixed。
+
+Qt 6.9 原生移动会发送模拟松手，不能据此结束动画；当前忽略该事件，等待 Leave 后 Enter。气泡不能 hide/show 重新映射，否则 niri 会先居中；使用 QGraphicsOpacityEffect 仅隐藏绘制，松手定位后等待本机弹簧动画约 700ms 恢复。33 个针对性测试通过；原 test_native_interactions 的 3 失败、1 错误未解决且未纳入通过数，该测试没有加载适配且含缺失素材。新代码、现有 Windows 入口和实际 Windows 回归验收需区分。
+
+为去除透明画布矩形阴影，在本机 ~/.config/niri/__custom__.kdl 末尾添加仓库 configs/niri-probe.kdl 的 include，仅作用于 app-id bailong-linux-probe。备份在 work/linux-validation/niri-custom-before.kdl，niri validate 通过；未改 GTK 主题、Codex 配置或系统 Python。后续移植重点：分离气泡、其他面板、跨屏及位置持久化；本次人工确认不覆盖这些路径。
+
+
+### Linux 持续运行入口（2026-10-25）
+
+新增根目录 run_linux.py，装配入口为 linux_app/launcher.py，无演示数据、截图采样或自动退出计时。原 tools/linux_live.py、tools/linux_niri.py、tools/linux_codex_readonly 移至 linux_app/live.py、linux_app/niri.py、linux_app/codex_readonly；验证脚本和测试共用这些模块，运行时平台替换使用可恢复的上下文管理器，未修改 app 生产源码。requirements-linux.txt 为共享依赖源，原验证依赖文件引用它。
+
+PyCharm 配置文件为 .run/Bailong Linux.run.xml，名称「桌宠 Linux」，使用项目 Python 3.12 .venv，启动 run_linux.py，无参数。niri 现有规则扩展为同时匹配正式 bailong-linux 与原 bailong-linux-probe，无新增全局主题改动。
+
+默认自身状态位于 XDG_DATA_HOME/codex-bailong/BailongEnhanced（本机 ~/.local/share/codex-bailong/BailongEnhanced）。首次仅迁移验证阶段的设置和已校验素材，后续保留设置/素材选择；凭据不复制，Codex 数据源仍只读，额度程序仍使用 bwrap。QLockFile 使用零过期时间防止长期运行后误判；同目录重复启动已拒绝。SIGINT/SIGTERM 关闭窗口及工作线程并释放目录锁。
+
+36 个针对性测试通过，实际正式入口验证额度、Token、IPC 均正常，SIGTERM 退出码 0、目录锁已释放。config.toml/auth.json/gtk.css 内容保持一致。未做整小时耐久测试，时限移除依据正式入口没有生命周期计时器。一次启动后 10 秒采样 CPU 约占单核 20.6%，早期 RSS 约 259 MiB，包含角色动画与实时监测，不能视为长期平均或性能优化结论。其他既有移植边界保留，详见 docs/LINUX.md。
+
+
+### niri 自主走动（2026-10-25）
+
+Linux 正式入口不再强制 wandering=False；首次升级开启并写 linux_wandering_ready 标记，之后保留用户暂停状态。仅 linux_app/niri.py 适配 DesktopPet 的 Python 坐标读写与 start/stop_walk，原移动路径、范围、速度、随机调度和动画选择仍使用 app 原实现，app 源码未修改。
+
+actual_position 将 niri 输出内位置加上当前 QScreen 逻辑原点；走动请求保留最新目标，33ms 计时器仅在有移动时运行，等布局变化确认后才提交下一增量，1500ms 无确认则停止本次走动。鼠标按下通过原 stop_walk 路径清除目标与计时器，原生拖动结束后待实际布局恢复再更新 wander_home。气泡沿用现有布局订阅跟随。
+
+用户确认会走动，询问被拖走姿态；已核实原素材没有 moveAnimations，原 start_walk 回退 dragAnimation，未更改素材/动画。两分钟采样含 walk/drag/landing/idle，气泡布局误差中位数0、最大2逻辑像素、异步连接采样峰值1；另一真实 niri 窗口测试在走动中注入鼠标按下后位置保持不变，超出边界目标被约束到完整画布内。41项针对性测试通过；跨屏、不同缩放和所有输入设备尚未完整人工验收。详情与重现证据在 docs/LINUX.md、忽略目录 work/linux-validation/walk-result.json 和 walk-contract.json。
+
+### Linux/niri 位置持久化
+
+新增 linux_app/placement.py，仅在 Linux 适配安装期间替换保存和恢复入口。Windows 初始化时会调用 save_settings，而 Wayland 窗口此时只有占位坐标，因此必须保留原 screen_position，等 niri 确认布局后再更新。输出名称从 WorkspacesChanged 映射取得，不能依赖跨屏时可能滞后的 QWidget.screen。恢复按显示器、输出内坐标分两阶段确认，气泡跨工作区也须先确认再计算相对增量。位置锁不阻止恢复；缺失输出回退首个 Qt 屏幕。45 项针对性测试通过，双屏、真实重启、位置锁与缺失输出配置在独立状态目录实测通过，证据 work/linux-validation/placement-*.json。未改 app 目录或 Windows 入口，也未证明全部 Windows 专属功能已移植。
+
+### Linux 重置公告卡片一直查询中
+
+正式入口遗留 refresh_reset_feed 空替换且没有创建 ResetThread，导致 reset_snapshot 永久为 None。已去掉空替换并在 launcher.create_pet 连接原 ResetThread 的 ready、failed、diagnostic、busy、completed 信号后启动，原关闭流程负责停止线程。无须改 app 或 Windows 入口。52 项公告、刷新与启动相关测试通过；独立状态目录的真实 GUI 启动实测公告接口 0.79 秒返回 available/ok，卡片状态 empty、文案「暂无安排」，证据 work/linux-validation/reset-result.json。公告为第三方公开信息，不是本机账户额度到账保证。
+
+### Linux 面板几何桥接
+
+linux_app/surfaces.py 仅替换 CompactBubble、DailyReport、NativeLanding 的几何读写，保留原逻辑目标与原画布动画，niri 布局确认后提交下一次增量。日报窗口透明度使用 QGraphicsOpacityEffect，因为 Wayland 原生 windowOpacity 不受支持。DesktopPet.geometry 同步实际布局；缩放位移在 apply_settings 结束后提交，避免被关闭走动时的 stop_walk 清除。分离气泡采用 startSystemMove，模拟松手与实际结束分开处理。原 app 目录无改动。
+
+原生窗口阶段检查见忽略目录 work/linux-validation/surface_check.py、surfaces-result.json、surface-check.log，稳定位置误差 0–1 逻辑像素，设置/聊天抓图已检查；位置恢复回归通过。21 项 Linux 测试通过；原 55 项面板测试中两项 test_bubble_resize 锚点测试失败（该次运行没有安装 Linux 适配），日志 gui-unit.log。动画闪跳、分离拖动及多屏交互仍需用户人工验收，不可写成全部视觉一致性已证明。测试进程均已退出。
+
+### Linux 便携包及 AppImage
+
+独立构建环境为 work/linux-build/venv（Python 3.12.14），固定依赖 tools/requirements-linux-build.txt；构建 tools/build_linux.py 使用 PyInstaller onedir 平铺布局，resources ROOT 在冻结后取可执行文件父目录。包内只包含已逐项 SHA256 校验的轻量素材，不从验证 state 或日常设置生成发布配置。tools/package_linux.py 从同一目录生成 tar.zst 与 AppImage；官方工具和运行时 SHA 固定在 tools/appimage-tools.lock.json。包内资源只读，用户数据目录沿用原 Linux 默认位置。
+
+运行时 --check-runtime 完整校验素材、初始化 TLS、查询真实额度。宿主 Codex 查询前恢复 LD_LIBRARY_PATH_ORIG；退出信号处理器仅设置标记，由 Qt 定时器执行关闭，避免信号重入 Qt notify 时崩溃。严格测试沙箱须 --dev-bind /dev /dev，否则 /dev/null 权限错误会导致误判额度查询失败。AppImage 在用户命名空间可能不能执行 FUSE 挂载，因此分别测试正常挂载和 --appimage-extract-and-run。
+
+本机 niri 的桌宠规则已原样复制到 ~/.config/niri/bailong-linux.kdl，仅替换 __custom__.kdl 中该条 include，niri validate 通过，原文件备份 work/linux-build/niri-custom-before.kdl。源码可移走而不影响规则。Windows app 目录未改动，未提交或推送。

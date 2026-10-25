@@ -1,0 +1,92 @@
+# Linux 启动
+
+当前入口针对 CachyOS / niri 原生 Wayland，使用原人物、气泡和界面组件。Windows 入口及 app 源码不变；Linux 平台适配集中在 linux_app/。这是日常持续运行入口，不表示所有 Linux 功能均已移植完成。
+
+## 启动与退出
+
+项目独立 `.venv` 已使用 Python 3.12 配置完成：
+
+```sh
+cd ~/forks/codex-bailong-desktop-pet
+.venv/bin/python run_linux.py
+```
+
+PyCharm 选择「桌宠 Linux」，解释器为项目 `.venv/bin/python`，脚本为 `run_linux.py`，参数留空。停止旧的验证实例后再运行。入口没有运行时限、演示额度、自动移动或自动截图；通过桌宠托盘/右键菜单退出，终端可按 Ctrl+C。SIGTERM 也会执行窗口与后台线程清理。同一数据目录只允许一个正式实例。
+
+已保留原生拖动、持续拎起动画、松手落地及气泡定位；气泡约等待 700 毫秒，让本机 niri 的位移动画收敛后显示。
+
+## 数据和依赖
+
+默认真实数据源为 `CODEX_HOME` 或 `~/.codex`。桌宠自身的配置、素材和索引保存在 `${XDG_DATA_HOME:-~/.local/share}/codex-bailong/BailongEnhanced`。可以显式指定：
+
+```sh
+.venv/bin/python run_linux.py --codex-home ~/.codex --codex-cli /usr/lib/chatgpt/resources/codex --data-dir ~/.local/share/codex-bailong
+```
+
+首次启动从仓库 `work/linux-validation/state-live/BailongEnhanced` 迁移已有桌宠设置，并复用已校验素材；原文件保留。后续不覆盖已有设置或素材选择。不会迁移 Codex 凭据、旧诊断截图或会话正文，统计索引从真实数据重新建立。素材采用硬链接，跨文件系统时回退为复制。
+
+依赖使用 `requirements-linux.txt`，已有环境不需重新安装：
+
+```sh
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r requirements-linux.txt
+```
+
+系统需有 niri/Wayland 和 bubblewrap 的 `bwrap`。没有 bwrap 时拒绝启动，不回退到无隔离的额度查询。数据读取继续使用真实 Unix IPC、只读 SQLite 和会话日志；额度 app-server 只能读取真实配置和认证文件，运行时写入临时挂载，代码位于 `linux_app/codex_readonly`。
+
+新 checkout 缺少素材时，先按 `docs/LINUX_VALIDATION.md` 下载原始轻量素材并运行：
+
+```sh
+.venv/bin/python tools/linux_probe.py materials work/linux-validation/materials-light.zip
+```
+
+## niri 专用窗口规则
+
+本机 `~/.config/niri/__custom__.kdl` 已包含稳定路径 `~/.config/niri/bailong-linux.kdl`（内容来自仓库 `configs/niri-probe.kdl`）。规则同时匹配正式 app-id `bailong-linux` 和诊断 app-id `bailong-linux-probe`，仅为这些窗口关闭矩形阴影、边框、模糊及圆角裁切，其他应用不受影响。程序包或仓库目录移动不影响这份已复制的规则。该文件使用本机 niri 的 background-effect 扩展，其他 niri 版本需先验证兼容性。
+
+GTK 主题桥接只在桌宠进程中关闭，不修改全局主题。Linux 入口不会写入 niri 规则，现有 include 由本次机器配置保留。
+
+## 已知范围与验证
+
+自主走动已适配 niri，首次升级会开启，之后尊重用户的暂停设置；声音和随机动作沿用已验证启动策略；Windows 自启动和更新服务未启用，重置公告使用原项目查询线程。设置/聊天、分离气泡、日报及缩放定位已接入，完整跨屏交互和 Windows 平台专属操作尚未全面验收，请勿将持续运行入口理解为完整跨平台发行版。
+
+诊断脚本保留时限及采样功能，正式入口不调用它。测试命令：
+
+```sh
+PYTHONPATH=.:tools:app QT_QPA_PLATFORMTHEME= .venv/bin/python -m unittest test_linux_placement test_linux_walk test_linux_launcher test_linux_niri test_live_compaction test_waiting_status
+```
+
+45 项针对性测试通过。正式入口实际运行验证了真实额度、Token 和 IPC，验证了重复启动拒绝及 SIGTERM 正常退出；没有等待整整一小时，时限移除依据独立入口不含自动退出定时器。
+
+本机启动后一次 10 秒采样约占单核 CPU 20.6%，早期 RSS 约 259 MiB；该测量包含动画与实时监测，不代表长期平均，本次未进行性能优化。
+
+
+## 自主走动
+
+自由走动沿用原项目的触发时机、速度、移动范围、水平走动开关和动画选择；通常在待机动画结束且没有高优先级任务时按原调度选择走动，不会启动后立即持续移动。右键菜单或设置中的自主走动开关可暂停/恢复，锁定位置会同时禁止移动。首次升级使用 `linux_wandering_ready` 标记开启此前被 Linux 入口关闭的选项，后续重启不会覆盖用户暂停选择。
+
+Linux 层将程序化移动合并为每秒最多约 30 次 niri 请求，每次增量基于已确认的窗口位置。位移目标限制在当前输出可用区域，整个人物画布不能越界；鼠标按下会停止走动并清除排队目标，之后沿用已验收的原生拖动路径。气泡继续跟随实际布局。后台没有逐帧启动 niri 子进程，停止移动后请求计时器停止。
+
+当前原始素材没有独立 `moveAnimations`，所以按原代码回退到 `dragAnimation`，自由移动时看起来像被拎着走；这不是 Linux 新选择的动作。没有修改 Windows 代码或替换动画素材。
+
+本机实测：两分钟采样记录到实际走动，气泡布局差值中位数为 0、最大约 2 逻辑像素，异步操作连接采样峰值 1。另一次原生窗口验证中，角色从 `(832,425)` 走到 `(958,343)` 时模拟鼠标按下，走动和排队目标立即清除，后续两次采样位置均保持 `(958,343)`；极端目标被约束到 `(0,0)` 和 `(1664,824)`，256×256 画布完整留在 1920×1080 输出内。真实拖动已有前序人工验证，本轮走动中按下的精确停位断言使用应用事件注入，不能代替所有输入设备和跨屏人工验收。
+
+## 位置记忆
+
+正式入口自动保存桌宠显示器名称和可用区域内的相对位置，重启后先等待 niri 建立窗口，再恢复显示器和位置。禁止移动选项不会阻止启动恢复；原显示器不可用时回退到 Qt 首个可用显示器，并按其逻辑尺寸约束位置。气泡等待跨屏工作区确认后再对齐，仍使用原来的间距、边缘约束与上下翻转规则。
+
+初始化、原生拖动中以及工作区布局不可用时不覆盖已保存位置，避免 Wayland 占位坐标破坏设置。状态继续保存在桌宠自己的 settings.json，不改 Codex 配置。重启 PyCharm 的「桌宠 Linux」即可使用，无需变更运行参数。
+
+本轮以独立状态目录启动真实 niri 窗口，验证 eDP-2 恢复到 (2369,511)、关闭重启后保持相同位置，以及 HDMI-A-1 恢复到 (449,511)。模拟配置中的显示器不存在时成功回退，气泡与预期锚点差值为 0 逻辑像素；上述恢复测试均开启禁止移动。负原点、缩放后逻辑工作区、越界比例和无效值另有单元测试，未实际热拔显示器或更改系统缩放。原 app 目录及 Windows 入口没有改动；这不代表所有 Windows 专属功能已经完成 Linux 验收。
+
+## 额外重置公告
+
+「重置」卡片读取原项目的第三方公开 Codex Resets 公告，区别于左侧本机账户额度的重置时间。Linux 正式入口现已接入原 ResetThread，支持首次查询、每分钟自动刷新、手动刷新、缓存和失败提示，不发送 Codex 凭据或会话数据。此前禁用查询而保留初始卡片，导致一直显示「查询中」；现在网络失败会显示原来的不可用或缓存状态。
+
+## 面板定位适配与验收
+
+Linux 的 `surfaces.py` 为气泡、Token 日报和原过渡画布登记独立窗口，保留原布局计算、组件和动画绘制，通过 niri 提交原生位置。跨输出和工作区分别等待确认，位移期间保留逻辑目标，防止动画读到 Wayland 占位坐标。分离气泡采用原生拖动；日报绘制透明度通过 Qt 图形效果实现；人物缩放位移独立于走动队列，维持脚底锚点。
+
+本轮独立状态目录的原生窗口检查覆盖状态、设置、聊天、返回、日报打开、极简/普通、分离及 1.4 倍人物缩放，稳定坐标误差为 0–1 个逻辑像素；位置恢复回归仍通过。21 项 Linux 针对性测试通过。另运行未安装 Linux 适配的原面板测试 55 项，其中 53 项通过，test_bubble_resize 的两项锚点测试失败；不能据此宣称全套测试通过。原 app 目录未改动。
+
+人工验收重点：分离面板拖动及重启位置、设置/聊天输入与返回、日报打开/收起及随气泡移动、普通/展开/胶囊/极简往返、人物大小调整、屏幕四角与跨屏。请观察动画过程是否出现居中闪现、跳动、裁切、残影或点击区域偏移；稳定坐标测试不能代替这些视觉验收。聊天联网、密钥、自启动等后台功能不属于本轮范围。
