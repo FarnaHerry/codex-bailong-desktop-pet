@@ -1,5 +1,7 @@
 # 白龙桌宠 Linux 便携版
 
+本分支源码已增加 KDE Plasma X11/XWayland 后端，详见 [KDE 说明](KDE.md)。现有 linux-preview.1 发布包不含该改动；以下 niri 发布记录不能作为 KDE 安装包的验证结论。
+
 本构建面向 CachyOS/Arch x86_64、niri 原生 Wayland。包含 Python 3.12、Qt 与轻量素材，不需要激活虚拟环境或安装系统 Python 包。不是所有 Linux 发行版通用包。
 
 便携包解压后执行 `./AppRun`；AppImage 先 `chmod +x 文件名.AppImage`，再执行它。也可使用 `--appimage-extract-and-run` 绕过 FUSE 挂载，但会产生临时解压开销。

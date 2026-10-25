@@ -15,11 +15,12 @@ if [ "$#" -ne 1 ] || [ "$1" != 'app-server' ]; then
 fi
 : "${CODEX_HOME:?CODEX_HOME is required}"
 : "${BAILONG_NATIVE_CODEX:?BAILONG_NATIVE_CODEX is required}"
-set -- -- "$BAILONG_NATIVE_CODEX" -c 'cli_auth_credentials_store="file"' app-server
+set -- -- /tmp/bailong-codex -c 'cli_auth_credentials_store="file"' app-server
 for name in config.toml auth.json; do
     if [ -f "$CODEX_HOME/$name" ]; then
         set -- --ro-bind "$CODEX_HOME/$name" "$CODEX_HOME/$name" "$@"
     fi
 done
 exec bwrap --die-with-parent --ro-bind / / --dev-bind /dev /dev --proc /proc \
-    --tmpfs /tmp --tmpfs "$CODEX_HOME" "$@"
+    --tmpfs /tmp --ro-bind "$BAILONG_NATIVE_CODEX" /tmp/bailong-codex \
+    --tmpfs "$CODEX_HOME" "$@"

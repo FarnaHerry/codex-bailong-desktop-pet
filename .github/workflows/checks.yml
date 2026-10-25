@@ -39,6 +39,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libegl1 libopengl0 libxkbcommon0 bubblewrap
       - run: python -m pip install -r requirements-linux.txt
-      - run: python -m compileall -q linux_app run_linux.py tools/build_linux.py tools/package_linux.py
+      - run: python -m compileall -q linux_app run_linux.py run_kde.py run_niri.py tools/build_linux.py tools/package_linux.py
       - name: Check Linux adapters and shared data handling
-        run: python -m unittest test_linux_launcher test_linux_placement test_linux_surfaces test_linux_walk test_linux_niri test_reset_watch test_reset_recovery test_reset_presentation test_refresh_flow
+        run: python -m unittest test_linux_entrypoints test_linux_launcher test_linux_backends test_linux_kde test_linux_readonly test_linux_placement test_linux_surfaces test_linux_walk test_linux_niri test_reset_watch test_reset_recovery test_reset_presentation test_refresh_flow

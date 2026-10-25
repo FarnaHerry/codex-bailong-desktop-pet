@@ -1,5 +1,20 @@
 # 项目交接要点
 
+## KDE 适配与独立桌面入口（2026-10-25）
+
+- KDE 变更基于 helantianshen/main 的 `3144a67`（v1.0.0 + Linux/niri 基线），只提交源码适配，未制作或发布安装包。
+- 按上游 issue #2 的隔离与验收建议整理：niri 使用独立 `run_niri.py`，KDE 使用独立 `run_kde.py`；两者固定自己的桌面，共享 Linux 生命周期。`run_linux.py` 保留自动选择和 `--desktop kde/niri` 兼容入口。Qt 在后端选定后才导入，不要把 Qt 原生 Wayland 的虚拟坐标当作 KDE 实际窗口位置。
+- `linux_app/kde.py` 使用 X Shape 的 ShapeInput 区域实现透明像素鼠标穿透，不调用 QWidget.setMask 裁切视觉透明边缘。按 DPR 生成物理像素位图，原画、变换与人物大小保持。单次事件计时器在绘制后合并更新，隐藏/同帧不重复上传。
+- Qt 6.9.2 切换置顶时可能重建 QWindow，而 QWidget.winId() 仍返回旧 ID；必须使用 windowHandle().winId() 操作 X11 资源。初轮探针因旧 ID 误报 BadWindow；改正后原生坐标、尺寸、置顶状态和命中区均已重新核对。
+- Codex CLI 现在可来自 PATH；本机独立 CLI 位于 CODEX_HOME 内，原 bubblewrap 临时 home 会遮住它。只读包装器在隐藏 home 前把实际可执行文件只读挂载到沙箱 /tmp/bailong-codex，config/auth 仍只读，运行时文件不落入真实 Codex 目录。独立合成沙箱回归核对配置不可写且运行时文件不会外泄。本机真实额度读取成功。
+- 桌面进程识别不再根据 CLI 父目录猜 ChatGPT 路径，而是确认同名 Electron 主程序旁的 resources/app.asar 并排除 --type 子进程，允许 CLI 与桌面程序分开安装。
+- 新建 Python 3.12.15 / PySide6 6.9.2 虚拟环境，32 个轻量素材文件逐项 SHA-256 核对。185 项回归及 app/linux_app/tools 和三个 Linux 入口编译检查通过；真实额度、Token、IPC 与公告已接通。Evernight Vista 44.0.1（Fedora 44 衍生）、x86_64、Plasma / KWin 6.7.5 Wayland、200% 缩放下实际 X11 坐标与 Qt 目标匹配，覆盖程序化移动、设置/聊天、日报、分离、胶囊往返、人物 1.0/1.4 倍及取消置顶。
+- 用户人工确认真实鼠标拖动、松手后的气泡跟随和透明区域点击正常。XTest 在本会话未送达角色，不能用注入替代该反馈；其他缩放、热插拔、多屏、长期运行和真实全屏播放器未验收。原 Linux 预览版的其他功能边界仍保留。
+- 原生切换探针的 21.63 秒采样包含多次控件抓图，进程 CPU 耗时 9.15 秒、末端 RSS 276.2 MiB；日常实例另一次 8 秒短采样为单核 CPU 17.9%、末端 RSS 349.1 MiB。这些不是长期平均、性能优化对照或显示帧率。诊断、截图和数据均在忽略目录 work/kde-validation，日常实例使用 XDG 数据目录，未修改桌面全局规则。
+- 运行与验证入口见 docs/KDE.md，其中按 issue 清单逐项区分已验证、未专项验收和未实现。会话跳转、视频全屏让位、Windows 更新/安装管理未适配，不把保留的 UI 入口视为 Linux 支持。KDE 日常启动 `.venv/bin/python run_kde.py`；已有日常实例时先从托盘退出，不要为重复启动删除有效锁。
+
+## 既有基线与历史记录
+
 开始改动前先读 `AGENTS.md`，再读本文件，随后核对当前源码和版本对应的验收记录。不要把旧版验证结果当作新版结果。
 
 - 当前公开基线 v0.9.9 / UI87。完整 Windows 包和程序更新包按同一源码构建；高清素材是独立、按内容哈希校验的资源。

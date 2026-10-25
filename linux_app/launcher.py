@@ -1,4 +1,4 @@
-"""持续运行的 Linux/niri 入口，使用本机真实 Codex 数据"""
+"""持续运行的 Linux KDE/niri 入口，使用本机真实 Codex 数据"""
 import argparse
 from contextlib import ExitStack
 import json
@@ -11,16 +11,26 @@ import sys
 ROOT = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
 
 
-def arguments(argv=None):
+def arguments(argv=None, *, desktop='auto'):
     """独立解析路径，不提供演示数据或定时退出选项"""
     parser = argparse.ArgumentParser(description=__doc__)
+    choices = ('auto', 'kde', 'niri') if desktop == 'auto' else (desktop,)
+    parser.add_argument('--desktop', choices=choices, default=desktop, help='桌面后端；专用入口固定桌面，通用入口默认自动识别')
     parser.add_argument('--check-runtime', action='store_true', help='检查包内素材、TLS 和只读额度查询后退出')
     parser.add_argument('--codex-home', type=Path, default=Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))))
-    parser.add_argument('--codex-cli', type=Path, default=Path('/usr/lib/chatgpt/resources/codex'))
+    parser.add_argument('--codex-cli', type=Path, help='Codex CLI；默认从 BAILONG_CODEX、PATH 或已知安装目录查找')
     parser.add_argument('--data-dir', type=Path, default=Path(os.environ.get('XDG_DATA_HOME', str(Path.home() / '.local/share'))) / 'codex-bailong')
     args = parser.parse_args(argv)
-    if sys.platform != 'linux' or not os.environ.get('WAYLAND_DISPLAY') or not os.environ.get('NIRI_SOCKET'):
-        parser.error('当前入口需要 Linux niri/Wayland 会话')
+    if sys.platform != 'linux':
+        parser.error('当前入口需要 Linux 会话')
+    from .backends import select
+    try:
+        args.desktop, args.qt_platform = select(args.desktop)
+    except ValueError as error:
+        parser.error(str(error))
+    if args.codex_cli is None:
+        candidate = os.environ.get('BAILONG_CODEX') or shutil.which('codex') or '/usr/lib/chatgpt/resources/codex'
+        args.codex_cli = Path(candidate)
     args.codex_home = args.codex_home.expanduser().resolve()
     args.codex_cli = args.codex_cli.expanduser().resolve()
     args.data_dir = args.data_dir.expanduser().resolve()
@@ -38,7 +48,7 @@ def arguments(argv=None):
 def environment(args):
     """在导入原应用之前设置本进程路径，保持 Codex 配置只读且桌宠状态独立"""
     sys.path.insert(0, str(ROOT / 'app'))
-    os.environ.update(QT_QPA_PLATFORM='wayland', QT_QPA_PLATFORMTHEME='',
+    os.environ.update(QT_QPA_PLATFORM=getattr(args, 'qt_platform', 'wayland'), QT_QPA_PLATFORMTHEME='',
                       LOCALAPPDATA=str(args.data_dir), APPDATA=str(args.data_dir / 'appdata'),
                       CODEX_HOME=str(args.codex_home), BAILONG_CODEX_HOME=str(args.codex_home))
     state = args.data_dir / 'BailongEnhanced'
@@ -74,14 +84,19 @@ def prepare_state(state):
 def create_pet(stack, args):
     """装配已验证的平台适配，不启动 Windows 自启动与更新服务"""
     from .overrides import replace
-    from . import live, niri
+    from . import live
     import desktop_settings, codex_startup
     from enhanced import ResetThread
     from desktop import DesktopPet
     stack.enter_context(replace(desktop_settings, 'autostart_enabled', lambda: False))
     stack.enter_context(replace(codex_startup, 'enabled', lambda: False))
     live.install(stack, args.codex_home, args.codex_cli)
-    niri.install(stack)
+    if args.desktop == 'niri':
+        from . import niri as windows
+        windows.install(stack)
+    else:
+        from . import kde as windows
+        windows.install(stack)
     pet = DesktopPet(monitor=False)
     pet.apply_settings(dict(random_actions=False, commentary=False, sound=False), save=False)
     # 仅迁移曾被 Linux 入口强制关闭的自由走动，之后尊重用户暂停设置
@@ -89,7 +104,10 @@ def create_pet(stack, args):
         pet.apply_settings(dict(wandering=True, linux_wandering_ready=True), save=True)
     pet.setWindowTitle('白龙桌宠 Linux')
     pet.bubble.setWindowTitle('白龙桌宠 Linux 状态')
-    niri.attach(pet)
+    if args.desktop == 'kde':
+        windows.attach(pet, stack)
+    else:
+        windows.attach(pet)
     pet.show()
     live.start(pet, args.codex_home)
     # 公告查询使用原工作线程，保留缓存、手动刷新和失败状态处理
@@ -105,9 +123,9 @@ def create_pet(stack, args):
     return pet
 
 
-def main(argv=None):
+def main(argv=None, *, desktop='auto'):
     """持有状态目录锁并运行 Qt，退出由用户或进程信号触发"""
-    args = arguments(argv)
+    args = arguments(argv, desktop=desktop)
     state = environment(args)
     from PySide6.QtCore import QLockFile
     from PySide6.QtWidgets import QApplication
@@ -152,7 +170,7 @@ def main(argv=None):
             for signum in (signal.SIGINT, signal.SIGTERM):
                 previous = signal.signal(signum, lambda *_: requested_exit.append(True))
                 stack.callback(signal.signal, signum, previous)
-            print('白龙桌宠 Linux 已启动；数据目录：' + str(state), flush=True)
+            print('白龙桌宠 Linux 已启动（' + args.desktop + '/' + app.platformName() + '）；数据目录：' + str(state), flush=True)
             try:
                 return app.exec()
             finally:

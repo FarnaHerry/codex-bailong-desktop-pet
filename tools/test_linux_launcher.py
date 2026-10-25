@@ -47,6 +47,22 @@ class LauncherTests(unittest.TestCase):
                 launcher.arguments(['--codex-home', folder, '--codex-cli', '/bin/true', '--data-dir', folder + '/pet'])
             self.assertEqual(result.exception.code, 2)
 
+    def test_kde_arguments_discover_cli_on_path(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'XDG_CURRENT_DESKTOP':'KDE', 'DISPLAY':':0'}, clear=True):
+            cli = Path(folder) / 'codex'
+            cli.write_text('#!/bin/sh\nexit 0\n')
+            cli.chmod(0o755)
+            with patch('linux_app.launcher.shutil.which', side_effect=lambda name: str(cli) if name == 'codex' else '/usr/bin/bwrap'):
+                args = launcher.arguments(['--codex-home', folder, '--data-dir', folder + '-state'])
+            self.assertEqual((args.desktop, args.qt_platform), ('kde', 'xcb'))
+            self.assertEqual(args.codex_cli, cli)
+
+    def test_kde_environment_selects_xcb_before_importing_qt(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, QT_QPA_PLATFORM='wayland'):
+            args = Namespace(data_dir=Path(folder), codex_home=Path(folder) / 'codex', qt_platform='xcb')
+            launcher.environment(args)
+            self.assertEqual(os.environ['QT_QPA_PLATFORM'], 'xcb')
+
 
 if __name__ == '__main__':
     unittest.main()

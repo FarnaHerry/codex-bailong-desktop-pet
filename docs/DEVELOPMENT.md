@@ -1,5 +1,7 @@
 # 开发与构建
 
+Linux 桌面使用分开的源码入口：niri 为 `run_niri.py`，KDE Plasma 为 `run_kde.py`，原 `run_linux.py` 为自动选择的兼容入口；平台代码位于 `linux_app/`。依赖、素材和运行步骤见 [LINUX.md](LINUX.md)，KDE 实机结果及未实现能力见 [KDE.md](KDE.md)。下文是既有 Windows 构建流程，本次适配不改变它。
+
 Windows x64，Python 3.12（当前本地冻结环境为3.12.14）。先安装 requirements-enhanced.txt，所有命令从仓库根目录执行。原项目与授权边界见根目录 NOTICE.md。
 
 ## 准备动画

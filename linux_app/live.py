@@ -52,13 +52,13 @@ def install(stack, home, executable):
     def presence():
         """按已选安装目录识别桌面主进程，不把 CLI 或 Electron 子进程当桌面"""
         import psutil
-        desktop = executable.parent.parent / 'ChatGPT'
         denied = False
         for process in psutil.process_iter(['name']):
             try:
-                if process.info['name'] not in ('ChatGPT', 'Codex', 'codex'):
+                if (process.info['name'] or '').lower() not in ('chatgpt', 'codex'):
                     continue
-                if Path(process.exe()).resolve() == desktop.resolve() and not any(a.startswith('--type=') for a in process.cmdline()[1:]):
+                binary = Path(process.exe()).resolve()
+                if (binary.parent / 'resources/app.asar').is_file() and not any(a.startswith('--type=') for a in process.cmdline()[1:]):
                     return True
             except psutil.AccessDenied:
                 denied = True
