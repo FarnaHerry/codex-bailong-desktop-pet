@@ -1,5 +1,14 @@
 # Linux 启动
 
+本分支新增 KDE Plasma X11 / XWayland 支持，详见 [KDE 运行说明](KDE.md)。各桌面入口分开、共享 Linux 数据与生命周期：
+
+| 桌面 | 入口 |
+| --- | --- |
+| niri 原生 Wayland | `.venv/bin/python run_niri.py` |
+| KDE X11 / XWayland | `.venv/bin/python run_kde.py` |
+
+`run_linux.py` 保留自动识别和 `--desktop kde` / `--desktop niri`，兼容已有配置；专用入口固定自己的后端。KDE 不需要 niri 或其窗口规则。以下 niri 专用步骤及历史验收记录保留原适用范围。
+
 当前入口针对 CachyOS / niri 原生 Wayland，使用原人物、气泡和界面组件。Windows 入口及 app 源码不变；Linux 平台适配集中在 linux_app/。这是日常持续运行入口，不表示所有 Linux 功能均已移植完成。
 
 ## 启动与退出
@@ -32,7 +41,7 @@ uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -r requirements-linux.txt
 ```
 
-系统需有 niri/Wayland 和 bubblewrap 的 `bwrap`。没有 bwrap 时拒绝启动，不回退到无隔离的额度查询。数据读取继续使用真实 Unix IPC、只读 SQLite 和会话日志；额度 app-server 只能读取真实配置和认证文件，运行时写入临时挂载，代码位于 `linux_app/codex_readonly`。
+系统需有 niri/Wayland（niri 后端）或 KDE/XWayland（KDE 后端），以及 bubblewrap 的 `bwrap`。没有 bwrap 时拒绝启动，不回退到无隔离的额度查询。数据读取继续使用真实 Unix IPC、只读 SQLite 和会话日志；额度 app-server 只能读取真实配置和认证文件，运行时写入临时挂载，代码位于 `linux_app/codex_readonly`。
 
 新 checkout 缺少素材时，先按 `docs/LINUX_VALIDATION.md` 下载原始轻量素材并运行：
 

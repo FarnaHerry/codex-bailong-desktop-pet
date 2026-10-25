@@ -6,7 +6,17 @@
 
 **[Linux 下载](https://github.com/helantianshen/codex-bailong-desktop-pet/releases/tag/v1.0.0-linux-preview.1)** · [Windows 上游下载](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest) · [快速部署](docs/快速部署说明.txt) · [全部新增功能](docs/新增功能说明.txt) · [开发说明](docs/DEVELOPMENT.md) · [迭代历史](docs/迭代历史.txt)
 
-## Linux / niri
+## Linux / niri / KDE
+
+本分支在 Linux/niri 适配基础上增加 **KDE Plasma X11 / XWayland 源码运行支持**。不同桌面使用独立入口，共享原界面和数据逻辑：
+
+| 环境 | 源码入口 | 窗口后端 |
+| --- | --- | --- |
+| Windows | `python app/enhanced.py` | 原 Windows 入口 |
+| niri | `.venv/bin/python run_niri.py` | 原生 Wayland + niri IPC |
+| KDE Plasma | `.venv/bin/python run_kde.py` | X11 / XWayland |
+
+原 `run_linux.py` 保留为自动识别桌面的兼容入口。准备依赖、素材和查看验证边界见 [KDE 运行说明](docs/KDE.md)及 [Linux 启动说明](docs/LINUX.md)。下方 linux-preview.1 是原 fork 已发布的 niri 包，尚不包含 KDE 改动。本轮不修改 `app/` 和 Windows 构建脚本。
 
 本 fork 的 Linux 预览版面向 **CachyOS/Arch x86_64 + niri 原生 Wayland**，不宣称兼容所有 Linux 发行版。Windows 入口、组件样式及原动画素材保持不变。
 
@@ -23,7 +33,7 @@ chmod +x Bailong-1.0.0-linux-preview.1-x86_64.AppImage
 ./Bailong-1.0.0-linux-preview.1-x86_64.AppImage
 ```
 
-默认 CLI 路径为 `/usr/lib/chatgpt/resources/codex`，其他安装位置通过 `--codex-cli /绝对路径/codex` 指定。首次配置 niri 时，按[使用说明](docs/LINUX_PACKAGE.md)将包内窗口规则复制到稳定配置路径并 include；规则包含本机 niri 的 `background-effect` 扩展，其他构建需验证兼容性。
+已发布预览包默认 CLI 路径为 `/usr/lib/chatgpt/resources/codex`；本分支源码会先检查 `BAILONG_CODEX` 和 PATH，也可通过 `--codex-cli /绝对路径/codex` 指定。首次配置 niri 时，按[使用说明](docs/LINUX_PACKAGE.md)将包内窗口规则复制到稳定配置路径并 include；规则包含本机 niri 的 `background-effect` 扩展，其他构建需验证兼容性。KDE 不使用这些规则。
 
 默认设置和统计索引保存在 `~/.local/share/codex-bailong/BailongEnhanced`（支持 `XDG_DATA_HOME`）。源码版、便携版和 AppImage 共用该位置，切换前退出旧实例；更新程序不覆盖位置与偏好。额度查询只读访问 Codex 配置，包内不包含账户、会话、个人设置或凭据。
 
@@ -52,7 +62,7 @@ chmod +x Bailong-1.0.0-linux-preview.1-x86_64.AppImage
 
 ## 桌面上可以做什么
 
-下表介绍上游 Windows 完整功能；Linux 的已适配范围和限制见 [Linux / niri](#linux--niri)。
+下表介绍上游 Windows 完整功能；Linux 的已适配范围和限制见 [Linux / niri / KDE](#linux--niri--kde)。
 
 | 功能 | 实际表现 |
 | --- | --- |
