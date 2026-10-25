@@ -1,5 +1,18 @@
 # 项目交接要点
 
+## Linux preview.2 发布验证（2026-10-25）
+
+- 本轮重新通过 108 项回归、actionlint 和 279 个归档载荷 SHA256；源码目录用 bwrap 隐藏后，便携版与 AppImage 解压模式真实 IPC/额度/Token、位置保存恢复及正常退出通过，普通 FUSE 挂载也通过。Codex config/auth 与日常设置哈希保持不变。
+- 打包监听实测使用外部 AppImage 路径创建独立 GUI 服务，手动退出不反复拉起；临时服务已清理。PyInstaller 的 Qt 运行钩子会预载 QtCore，不能将源码的无 Qt 结论套到冻结包；冻结监听没有 QtGui/QtWidgets 映射，5 秒采样单核 CPU 2.2%、RSS 44.0 MiB。
+- 三种包体运行的两秒短采样单核 CPU 27.5–30.5%、RSS 226.7–363.3 MiB，包含启动与动画，非长期平均或性能对照。压缩健康为 degraded，不声称完整压缩行为通过。未做 KDE 包体、其他发行版、重新登录或 Windows 人工验收。证据 work/linux-build/preview2-*，源码外验收位于当前聊天 work/preview2。
+
+## Linux 随 Codex 启动（2026-10-25）
+
+- linux_app/codex_watch.py 复用原 LaunchGate，按当前用户 Electron 主进程的 PID/创建时间识别会话，排除 CLI 和 --type 子进程；live.py 的桌面存在检测共用此实现。--watch-codex 在 Qt 初始化及素材准备前进入监听，仅两秒扫描进程，不加载 Qt。未知权限状态不当作 Codex 退出。
+- 独立 bailong-codex-watch.service 通过原设置页开关立即启停；触发的 GUI 使用 systemd-run 创建 bailong-codex-pet.service，避免停止监听时被同一 cgroup 杀死。普通开机启动仍只登记、不立即启动，原 app/Windows 逻辑未变；随 Codex 关闭尚未接入。
+- Autostart 管理器支持独立单元和监听参数，启用失败恢复原文件与登记状态。调用宿主 systemctl/systemd-run 前恢复 PyInstaller LD_LIBRARY_PATH。临时服务通过 D-Bus 传参，仅美元变量需转义，不能套用 unit 文本的百分号转义；真实 systemd 合成路径验证通过。
+- 108 项回归、actionlint 及 diff 检查通过。独立数据目录实测真实 Codex 启动触发、手动关闭不重拉起、关闭监听保留 GUI；监听进程未映射 Qt，5 秒短采样单核 CPU 1.2%、RSS 18.3 MiB。测试服务已清理，日常开关未开启；未退出用户 Codex、未重新登录及打包验收。证据 work/linux-autostart/watch-integration.log。
+
 ## Linux systemd 自启动（2026-10-25）
 
 - linux_app/autostart.py 只替换 Linux 进程内 desktop、desktop_services、desktop_settings 的已导入启动函数，Windows app/ 源码不变。服务采用 graphical-session.target 的 WantedBy/After/PartOf，正常退出不重启；开关只 enable/disable，不用 --now。没有默认开启日常自启动，也没有启用 linger。

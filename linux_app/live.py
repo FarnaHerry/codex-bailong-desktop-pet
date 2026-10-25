@@ -50,21 +50,10 @@ def install(stack, home, executable):
             reader.stop_event.wait(3)
 
     def presence():
-        """按已选安装目录识别桌面主进程，不把 CLI 或 Electron 子进程当桌面"""
-        import psutil
-        denied = False
-        for process in psutil.process_iter(['name']):
-            try:
-                if (process.info['name'] or '').lower() not in ('chatgpt', 'codex'):
-                    continue
-                binary = Path(process.exe()).resolve()
-                if (binary.parent / 'resources/app.asar').is_file() and not any(a.startswith('--type=') for a in process.cmdline()[1:]):
-                    return True
-            except psutil.AccessDenied:
-                denied = True
-            except (psutil.NoSuchProcess, OSError):
-                pass
-        return None if denied else False
+        """共享 Linux 桌面会话判定，未知权限状态不能被当作桌面退出"""
+        from .codex_watch import desktop_sessions
+        sessions = desktop_sessions()
+        return None if sessions is None else bool(sessions)
 
     stack.enter_context(replace(LiveStatusReader, 'run', run))
     stack.enter_context(replace(desktop_services, 'codex_desktop_open', presence))

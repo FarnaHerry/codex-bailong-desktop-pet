@@ -104,15 +104,15 @@ Linux 的 `surfaces.py` 为气泡、Token 日报和原过渡画布登记独立�
 
 源码入口根据人物当前帧、翻转与大小生成 `alpha >= 12` 的逻辑像素输入区域。阈值转换与 KDE 共用 `linux_app/input_shape.py`，niri 通过原生 Wayland `QWindow.setMask` 设置输入区域，不调用 QWidget 的视觉裁剪，保留人物柔和透明边缘。普通透明角落允许点击下层窗口；鼠标按住及原生拖动期间保留完整输入范围，松手后恢复轮廓，以维持已有 Enter/Leave 拖动交接。整窗鼠标穿透设置仍优先。
 
-95 项适配与公告刷新测试通过，覆盖全部 alpha、空帧、输入行对齐、翻转、尺寸变化和拖动恢复；KDE 既有四档 DPR 回归通过。真实 niri 协议采样确认提交输入区域，用户确认透明角落可点下层、人物点击拖动及松手动画/气泡恢复正常。未覆盖所有分数缩放与跨屏热插拔；此更改尚未进入发布包。
+95 项适配与公告刷新测试通过，覆盖全部 alpha、空帧、输入行对齐、翻转、尺寸变化和拖动恢复；KDE 既有四档 DPR 回归通过。真实 niri 协议采样确认提交输入区域，用户确认透明角落可点下层、人物点击拖动及松手动画/气泡恢复正常。未覆盖所有分数缩放与跨屏热插拔；此更改包含在 linux-preview.2 中。
 
 ## 登录图形桌面后自启动
 
-Linux 源码入口的设置 → 开机启动使用 systemd 用户服务。启用并应用后生成 `${XDG_CONFIG_HOME:-~/.config}/systemd/user/bailong.service`，随 `graphical-session.target` 启动、注销桌面时停止；正常退出不重启，异常退出最多在一分钟内尝试启动三次。不需要 root 或 linger。关闭开关只取消下次登录启动，不退出当前桌宠。“随 Codex 启动”仍未适配，与此开关无关。
+Linux 源码入口的设置 → 开机启动使用 systemd 用户服务。启用并应用后生成 `${XDG_CONFIG_HOME:-~/.config}/systemd/user/bailong.service`，随 `graphical-session.target` 启动、注销桌面时停止；正常退出不重启，异常退出最多在一分钟内尝试启动三次。不需要 root 或 linger。关闭开关只取消下次登录启动，不退出当前桌宠。“随 Codex 启动”使用下述独立监听服务，与此开关分别管理。
 
 服务记录源码虚拟环境或便携程序的绝对路径及当前 `--codex-home`、`--codex-cli`、`--data-dir`，不保存认证内容和本次会话的 socket。每次登录自动选择 niri/KDE；桌面会话须向 systemd 用户管理器导入图形环境。现有手工管理的同名服务不会被覆盖。
 
-AppImage 启动时从 `APPIMAGE` 获取外部文件路径，并确认当前程序位于对应 `APPDIR`；不把临时挂载路径登记为服务。源码虚拟环境、便携目录或 AppImage 移动后，请从新位置启动，关闭并重新开启自启动。现有发布包尚不包含此功能；AppImage 路径分支已做模拟回归，尚未重新构建安装包进行验收。
+AppImage 启动时从 `APPIMAGE` 获取外部文件路径，并确认当前程序位于对应 `APPDIR`；不把临时挂载路径登记为服务。源码虚拟环境、便携目录或 AppImage 移动后，请从新位置启动，关闭并重新开启自启动。linux-preview.2 包含此功能；两个开关互不依赖，关闭“开机启动”不影响独立的 Codex 监听服务。
 
 查看状态和日志：
 
@@ -123,3 +123,18 @@ journalctl --user -u bailong.service -b
 ```
 
 本机已用独立临时服务实测启用、带特殊字符的 ExecStart、执行和禁用，测试服务已清理；未通过注销/重新登录进行完整会话验收。实现功能本身不默认开启日常自启动。
+
+## 随 Codex 启动
+
+源码版设置 → Codex → 随 Codex 启动，打开并应用后启用 `bailong-codex-watch.service`，立即开始监听，并在下次登录图形桌面时自动恢复。监听器每两秒识别当前用户的 Codex Electron 桌面主进程，忽略普通 CLI 与 Electron 子进程；开启时若 Codex 已运行，也会尝试启动桌宠。
+
+每次新的 Codex 进程会话只触发一次，同一会话中手动退出桌宠不会反复拉起。桌宠仍受数据目录单实例锁保护，与普通开机自启动同时开启不会产生重复界面。“随 Codex 关闭”仍未接入，不因启用启动监听而自动开启退出联动。
+
+监听器不创建 Qt GUI、不加载人物素材或查询额度；源码入口不导入 Qt，冻结包的 PyInstaller 钩子会预载 QtCore。触发时通过独立临时用户服务 `bailong-codex-pet.service` 启动桌宠；关闭开关会取消监听器的自启动并立即停止监听，不关闭已运行的桌宠。监听与桌宠服务都随图形会话结束而停止，不改动 Codex 配置或启动器。
+
+```sh
+systemctl --user status bailong-codex-watch.service
+journalctl --user -u bailong-codex-watch.service -b
+```
+
+108 项适配/公告刷新回归通过。本机用隔离数据目录确认真实 Codex 检测及桌宠启动、手动停止桌宠后不重新拉起、停止监听后桌宠保留；测试服务已清理，未开启日常监听。5 秒短采样监听器单核 CPU 1.2%、RSS 18.3 MiB，未加载 Qt；这不是长期平均。未关闭用户的 Codex 来做完整退出再打开验收，会话重开逻辑由原 LaunchGate 回归覆盖；新 AppImage 与重新登录仍需后续验收。

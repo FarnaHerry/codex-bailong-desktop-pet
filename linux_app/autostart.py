@@ -9,6 +9,18 @@ UNIT = 'bailong.service'
 MARKER = '# Managed by Bailong Linux autostart\n'
 
 
+def host_environment():
+    """宿主 systemd 工具不加载 PyInstaller 私有动态库"""
+    import sys
+    env = os.environ.copy()
+    if getattr(sys, 'frozen', False):
+        if 'LD_LIBRARY_PATH_ORIG' in env:
+            env['LD_LIBRARY_PATH'] = env['LD_LIBRARY_PATH_ORIG']
+        else:
+            env.pop('LD_LIBRARY_PATH', None)
+    return env
+
+
 def quote(value):
     """转义 systemd ExecStart 参数，禁止控制字符和变量展开"""
     value = str(value)
@@ -41,16 +53,17 @@ def launch_command(args, root):
 
 class Autostart:
     """只管理本应用用户服务，不启停当前实例或修改系统级设置"""
-    def __init__(self, args, root):
+    def __init__(self, args, root, *, unit=None, flags=(), immediate=False):
         self.args, self.root = args, root
+        self.unit, self.flags, self.immediate = unit or UNIT, flags, immediate
         config = Path(os.environ.get('XDG_CONFIG_HOME', str(Path.home() / '.config')))
-        self.path = config / 'systemd/user' / UNIT
+        self.path = config / 'systemd/user' / self.unit
 
     def run(self, *arguments, check=True):
         """限制 systemctl 等待时间，并将失败反馈给原设置页"""
         try:
             result = subprocess.run(['systemctl', '--user', *arguments], capture_output=True,
-                                    text=True, timeout=5)
+                                    text=True, timeout=5, env=host_environment())
         except subprocess.TimeoutExpired as error:
             raise OSError('systemd 用户服务响应超时') from error
         if check and result.returncode:
@@ -59,7 +72,7 @@ class Autostart:
 
     def enabled(self):
         """读取 systemd 登记状态，不启动服务或创建文件"""
-        result = self.run('is-enabled', UNIT, check=False)
+        result = self.run('is-enabled', self.unit, check=False)
         state = result.stdout.strip()
         if state in ('enabled', 'enabled-runtime'):
             return True
@@ -67,14 +80,14 @@ class Autostart:
             return False
         if not state and not self.path.exists():
             # 较旧 systemd 的 is-enabled 只在 stderr 报不存在，LoadState 不依赖语言
-            loaded = self.run('show', UNIT, '--property=LoadState', '--value')
+            loaded = self.run('show', self.unit, '--property=LoadState', '--value')
             if loaded.stdout.strip() == 'not-found':
                 return False
         raise OSError(result.stderr.strip() or '无法读取 systemd 自启动状态')
 
     def content(self):
         """生成随图形会话启停的服务，正常退出不重启"""
-        command = ' '.join(quote(value) for value in launch_command(self.args, self.root))
+        command = ' '.join(quote(value) for value in launch_command(self.args, self.root) + list(self.flags))
         return MARKER + f'''[Unit]
 Description=Bailong desktop pet
 PartOf=graphical-session.target
@@ -109,24 +122,28 @@ WantedBy=graphical-session.target
         """仅改变下次登录登记；失败时恢复原文件与启用状态"""
         previous = self.path.read_bytes() if self.path.exists() else None
         if self.path.is_symlink() or (previous is not None and not previous.startswith(MARKER.encode())):
-            raise OSError('已有手工管理的 bailong.service，请先处理该服务，避免覆盖')
+            raise OSError('已有手工管理的 ' + self.unit + '，请先处理该服务，避免覆盖')
         was_enabled = self.enabled()
         if not enabled:
             if previous is not None or was_enabled:
-                self.run('disable', UNIT)
+                self.run('disable', *(['--now'] if self.immediate else []), self.unit)
             return
         content = self.content().encode()
         try:
             self.write(content)
             self.run('daemon-reload')
-            self.run('enable', UNIT)
+            self.run('enable', self.unit)
+            if self.immediate:
+                self.run('restart', self.unit)
         except OSError:
             if previous is None:
                 self.path.unlink(missing_ok=True)
             else:
                 self.write(previous)
             self.run('daemon-reload', check=False)
-            self.run('enable' if was_enabled else 'disable', UNIT, check=False)
+            self.run('enable' if was_enabled else 'disable', self.unit, check=False)
+            if self.immediate:
+                self.run('restart' if was_enabled else 'stop', self.unit, check=False)
             raise
 
 

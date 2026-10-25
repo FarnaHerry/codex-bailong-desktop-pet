@@ -1,6 +1,6 @@
 # KDE Plasma 运行说明
 
-本分支在 [helantianshen 的 Linux/niri 适配](https://github.com/helantianshen/codex-bailong-desktop-pet/tree/3144a6769b1590f4e2665077d907b92bb7d4c4d7)上增加 KDE 支持。Windows 基线为 v1.0.0，尚未制作或发布包含 KDE 适配的安装包；原 fork 的 linux-preview.1 下载包仍只支持 niri。按[上游 Linux issue 的审阅建议](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/2#issuecomment-6392931998)隔离平台代码、说明实机环境与功能边界。
+本分支在 [helantianshen 的 Linux/niri 适配](https://github.com/helantianshen/codex-bailong-desktop-pet/tree/3144a6769b1590f4e2665077d907b92bb7d4c4d7)上增加 KDE 支持。Windows 基线为 v1.0.0，linux-preview.2 包含 KDE 后端；早期 linux-preview.1 下载包只支持 niri。按[上游 Linux issue 的审阅建议](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/2#issuecomment-6392931998)隔离平台代码、说明实机环境与功能边界。
 
 ## 启动
 
@@ -77,4 +77,4 @@ Review 修复后重新运行 190 项回归（其中上述适配命令为 93 项�
 | 数据存储 | 重启或切换入口，检查设置；只读沙箱内尝试写入合成配置和运行时文件 | XDG 独立目录、单实例锁、状态复用和配置只读验证通过；提交与测试夹具不含真实数据 |
 | 更新、安装管理 | 检查维护页与 Linux 程序分发方式 | Windows 安装/回退和应用内更新未适配；源码按上述步骤运行，不使用 Windows 更新包 |
 
-未覆盖实际多屏热插拔、其他系统缩放或长期稳定性。声音、聊天密钥、自启动等原 Linux 预览版边界仍然存在。聊天页面可打开，不代表联网聊天及密钥保存已通过验收。KDE 便携包/AppImage 本轮没有构建或安装验收；原 Linux 构建步骤保留在 [LINUX_PACKAGE.md](LINUX_PACKAGE.md)，不能沿用旧 niri 包结论。
+未覆盖实际多屏热插拔、其他系统缩放或长期稳定性。声音、聊天密钥等原 Linux 预览版边界仍然存在；自启动现已接入 Linux systemd，见 LINUX.md。聊天页面可打开，不代表联网聊天及密钥保存已通过验收。KDE 便携包/AppImage 本轮没有构建或安装验收；原 Linux 构建步骤保留在 [LINUX_PACKAGE.md](LINUX_PACKAGE.md)，不能沿用旧 niri 包结论。

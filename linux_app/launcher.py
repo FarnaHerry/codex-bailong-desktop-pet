@@ -16,6 +16,7 @@ def arguments(argv=None, *, desktop='auto'):
     parser = argparse.ArgumentParser(description=__doc__)
     choices = ('auto', 'kde', 'niri') if desktop == 'auto' else (desktop,)
     parser.add_argument('--desktop', choices=choices, default=desktop, help='桌面后端；专用入口固定桌面，通用入口默认自动识别')
+    parser.add_argument('--watch-codex', action='store_true', help='仅监听 Codex 桌面启动，不加载人物界面')
     parser.add_argument('--check-runtime', action='store_true', help='检查包内素材、TLS 和只读额度查询后退出')
     parser.add_argument('--codex-home', type=Path, default=Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))))
     parser.add_argument('--codex-cli', type=Path, help='Codex CLI；默认从 BAILONG_CODEX、PATH 或已知安装目录查找')
@@ -83,14 +84,13 @@ def prepare_state(state):
 
 def create_pet(stack, args):
     """装配已验证的平台适配，不启动 Windows 自启动与更新服务"""
-    from .overrides import replace
     from . import live
-    import desktop_settings, codex_startup
     from enhanced import ResetThread
     from desktop import DesktopPet
     from . import autostart
     autostart.install(stack, args, ROOT)
-    stack.enter_context(replace(codex_startup, 'enabled', lambda: False))
+    from . import codex_watch
+    codex_watch.install(stack, args, ROOT)
     live.install(stack, args.codex_home, args.codex_cli)
     if args.desktop == 'niri':
         from . import niri as windows
@@ -128,6 +128,9 @@ def main(argv=None, *, desktop='auto'):
     """持有状态目录锁并运行 Qt，退出由用户或进程信号触发"""
     args = arguments(argv, desktop=desktop)
     state = environment(args)
+    if args.watch_codex:
+        from .codex_watch import watch
+        return watch(args, ROOT, state)
     from PySide6.QtCore import QLockFile
     from PySide6.QtWidgets import QApplication
     from typography import install_ui_font
