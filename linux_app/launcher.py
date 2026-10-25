@@ -88,7 +88,8 @@ def create_pet(stack, args):
     import desktop_settings, codex_startup
     from enhanced import ResetThread
     from desktop import DesktopPet
-    stack.enter_context(replace(desktop_settings, 'autostart_enabled', lambda: False))
+    from . import autostart
+    autostart.install(stack, args, ROOT)
     stack.enter_context(replace(codex_startup, 'enabled', lambda: False))
     live.install(stack, args.codex_home, args.codex_cli)
     if args.desktop == 'niri':

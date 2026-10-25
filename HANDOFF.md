@@ -1,5 +1,19 @@
 # 项目交接要点
 
+## Linux systemd 自启动（2026-10-25）
+
+- linux_app/autostart.py 只替换 Linux 进程内 desktop、desktop_services、desktop_settings 的已导入启动函数，Windows app/ 源码不变。服务采用 graphical-session.target 的 WantedBy/After/PartOf，正常退出不重启；开关只 enable/disable，不用 --now。没有默认开启日常自启动，也没有启用 linger。
+- 源码必须保留虚拟环境 sys.executable 的路径，不能 resolve 为系统 Python。AppImage 只在 frozen 且当前可执行文件位于 APPDIR 时采用经检查的外部 APPIMAGE；不存在则报错，不能登记临时路径。ExecStart 对引号、反斜线、百分号和美元符号分别转义，保留数据路径和 Codex 参数，桌面每次登录自动识别。
+- 手工同名服务不覆盖，写入原子替换，启用失败恢复原文件与登记状态。systemctl 调用仅发生在设置读取/应用时，无后台轮询，每次等待上限 5 秒。服务操作仍在原同步设置流程中；没有做 UI 卡顿性能保证。
+- 临时 bailong-autostart-validation.service 已在真实 systemd 用户管理器完成启用、ExecStart 特殊字符验证、执行和禁用，并删除该测试文件。Type=simple 的 start 返回不等于子进程已经写完测试结果，验证需等待结果文件。未注销登录验收，未新打包 AppImage。
+
+## niri 人物输入区域（2026-10-25）
+
+- `linux_app/wayland_input.py` 仅由 niri 入口安装，使用 QWindow mask 设置 Wayland 输入区域，不设置 QWidget mask；阈值位图从 KDE 实现提取到 input_shape.py，KDE 行为保持。Qt 6.9.2 Wayland 将空 mask 解释为整窗输入，空帧必须使用窗口外的非空矩形，不能传空 QRegion。输入区域随 surface commit 生效，设置后补一次绘制；同帧缓存防止形成持续重绘循环。
+- 输入范围使用 Wayland 逻辑坐标；按住/原生拖动时保留整窗输入，确保原 niri 的 Leave/Enter 松手交接不会因人物姿态变化而失效。隐藏时不计算，计时器只在绘制后单次触发。窗口句柄、帧、翻转、大小和按住状态变化会更新区域。
+- 95 项本地回归和 actionlint 通过，8 秒原生协议采样确认 set_input_region、无解码错误并正常退出。用户验收透明角落穿透、人物点击拖动、松手动画和气泡恢复均正常。独立诊断实例 10 秒短采样单核 CPU 28.6%、RSS 274.8 MiB，含动画及人工交互，不代表长期平均或性能对照。未改 app/Windows 入口；未重新打包，未完整验收分数缩放和跨屏热插拔。诊断日志在忽略目录 work/linux-validation/input-*。
+- PR 跟进自动化 kde-pr 已删除，automation.toml 已不存在；先前暂停调用虽返回成功，但后续复核文件仍标 ACTIVE，不能只凭更新响应宣称已停用。
+
 ## PR #1 review 修复（2026-10-25）
 
 - 维护者指出无条件把 Codex CLI 挂到 /tmp/bailong-codex 会破坏相邻文件查找。包装器现在始终在原路径执行；未被遮蔽的安装不重定位，CODEX_HOME 内的顶层安装子树（如 packages/）整体只读挂回原位置，保留脚本、模块与资源；/tmp 内的完整安装同理。根层 config/auth 仍只读，运行时文件仍只存在于临时 home。直接位于被遮蔽根目录的单个启动器明确拒绝，不猜测或绕过依赖。

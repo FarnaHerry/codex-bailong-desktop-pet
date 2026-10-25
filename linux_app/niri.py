@@ -267,6 +267,8 @@ def install(stack):
     from .overrides import replace
     from . import placement
     placement.install(stack)
+    from . import wayland_input
+    wayland_input.install(stack)
     from . import surfaces
     surfaces.install(stack)
     from desktop import DesktopPet
@@ -397,6 +399,8 @@ def install(stack):
 def attach(pet):
     """在标题设置完毕后绑定本进程原生窗口"""
     pet._niri_windows = NiriWindows(pet)
+    from .wayland_input import attach
+    attach(pet)
     from .surfaces import Surfaces
     pet._niri_windows.surfaces = Surfaces(pet._niri_windows)
     pet._niri_windows.surfaces.bind(pet.bubble)

@@ -35,7 +35,7 @@ CLI 优先使用 `--codex-cli`，其次是 `BAILONG_CODEX`、PATH 中的 `codex`
 ## 窗口与数据
 
 - KDE 使用原 Qt 拖动与布局路径；niri 继续使用原生 Wayland 和自己的 IPC 适配，不会加载 KDE 鼠标命中逻辑。
-- 人物的鼠标命中通过 X Shape 的输入区域处理，沿用 Windows `DesktopPet.alpha_hit()` 的 `alpha >= 12` 阈值，半透明可点击边缘保留，视觉透明边缘不裁切；“鼠标穿透”可关闭整个人物的鼠标输入。niri 当前尚无对应的逐像素输入区域，本轮不修改它，也不宣称 niri 已遵循此阈值。
+- 人物的鼠标命中通过 X Shape 的输入区域处理，沿用 Windows `DesktopPet.alpha_hit()` 的 `alpha >= 12` 阈值，半透明可点击边缘保留，视觉透明边缘不裁切；“鼠标穿透”可关闭整个人物的鼠标输入。niri 源码入口的对应输入区域适配见 [Linux 说明](LINUX.md#niri-透明区域点击穿透)。
 - 命中区域按屏幕物理像素生成，并跟随帧、翻转、缩放及原生窗口重建更新。关闭置顶后继续尊重该设置。
 - 会话、Token、额度和公告沿用真实本机来源。额度查询使用原只读 bubblewrap 沙箱；CLI 安装在 CODEX_HOME 内也能执行，不开放配置写入。
 - 不把现有 Windows 更新包当成 Linux 更新包使用。
