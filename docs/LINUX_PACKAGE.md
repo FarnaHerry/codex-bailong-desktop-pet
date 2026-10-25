@@ -45,3 +45,11 @@ work/linux-build/venv/bin/python tools/package_linux.py \
 两个构建命令均拒绝覆盖已有目标目录。打包过程不会安装到系统或调用 Windows 构建脚本。
 
 运行时自检使用 `./AppRun --check-runtime` 或 `./文件名.AppImage --check-runtime`，验证完整素材、TLS 上下文以及真实只读额度查询，然后退出。自检也持有状态目录锁；已有日常实例时请指定独立 `--data-dir`，不要与日常实例共享写入。
+
+## GitHub Actions
+
+`Source checks` 在 push、pull request 和手动触发时分别运行 Windows 与 Linux 检查。Linux 使用 Ubuntu 22.04、Python 3.12 和 offscreen Qt，执行 Linux 适配及公告/刷新测试；Windows job 保持独立。
+
+在 Actions 中选择 `Build Linux packages` → `Run workflow`，选定分支后手动构建。工作流按素材清单下载并逐文件验证轻量素材，按锁文件验证 AppImage 工具，然后生成便携 tar.zst、AppImage 和 SHA256SUMS.txt。文件名包含源码提交的前 12 位，成功后从该次运行的 Artifacts 下载，保留 7 天；下载 AppImage 后需赋予执行权限。此工作流只保存 CI 产物，不创建或覆盖 Release。
+
+CI 会验证归档载荷，并在源码目录外执行两种包的 `--help`。Ubuntu runner 没有真实 niri 会话与 Codex 账户，这些检查不能替代拖动、走动、面板定位及真实数据接入验收。采用 Ubuntu 22.04 构建基线也不代表已经支持 GNOME 或所有 Linux 发行版。
