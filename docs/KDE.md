@@ -35,10 +35,12 @@ CLI 优先使用 `--codex-cli`，其次是 `BAILONG_CODEX`、PATH 中的 `codex`
 ## 窗口与数据
 
 - KDE 使用原 Qt 拖动与布局路径；niri 继续使用原生 Wayland 和自己的 IPC 适配，不会加载 KDE 鼠标命中逻辑。
-- 人物的鼠标命中通过 X Shape 的输入区域处理，透明区域允许点击后面的窗口，视觉透明边缘不裁切；“鼠标穿透”可关闭整个人物的鼠标输入。
+- 人物的鼠标命中通过 X Shape 的输入区域处理，沿用 Windows `DesktopPet.alpha_hit()` 的 `alpha >= 12` 阈值，半透明可点击边缘保留，视觉透明边缘不裁切；“鼠标穿透”可关闭整个人物的鼠标输入。niri 当前尚无对应的逐像素输入区域，本轮不修改它，也不宣称 niri 已遵循此阈值。
 - 命中区域按屏幕物理像素生成，并跟随帧、翻转、缩放及原生窗口重建更新。关闭置顶后继续尊重该设置。
 - 会话、Token、额度和公告沿用真实本机来源。额度查询使用原只读 bubblewrap 沙箱；CLI 安装在 CODEX_HOME 内也能执行，不开放配置写入。
 - 不把现有 Windows 更新包当成 Linux 更新包使用。
+
+CLI 始终在其原路径执行，未被遮蔽的安装保持原样；若 CLI 位于 CODEX_HOME 内，则将其所在的顶层安装子树（如 `packages/`，包括相邻脚本、模块、资源）只读挂回原位置。安装的完整依赖须在该子树内或其他未遮蔽的系统路径；CODEX_HOME 根目录仍是私有可写运行空间，根层 config/auth 单独只读挂载。`/tmp` 内的临时安装也按完整子目录保留原路径。直接放在 CODEX_HOME 或 `/tmp` 根目录的独立启动器会明确拒绝，请将完整安装放进子目录或外部；不会把单个文件重定位到 `/tmp/bailong-codex`。
 
 ## 验证边界
 
@@ -57,7 +59,9 @@ PYTHONPATH=.:tools:app QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME= \
   test_linux_niri test_reset_watch test_reset_recovery test_reset_presentation test_refresh_flow
 ```
 
-本轮 185 项回归通过（其中上述适配命令为 88 项），并完成 app/linux_app/tools 与三个 Linux 入口的编译检查。用户在本机用真实鼠标确认人物拖动、松手后的气泡跟随及透明区域点击正常；该人工反馈补充了 XTest 注入在本次 Plasma 会话中未送达角色的验证限制。niri 本轮只做入口与适配单元回归，未在 niri 实机重复验收；Windows `app/` 和构建脚本未修改，也未声称完成 Windows 实机回归。
+Review 修复后重新运行 190 项回归（其中上述适配命令为 93 项），并完成 app/linux_app/tools 与三个 Linux 入口的编译检查。新增测试覆盖原路径相邻脚本/资源、沙箱内外完整安装目录、配置与认证不可写、运行时文件不外泄，以及全部 256 种 alpha、四档缩放和水平翻转。真实 CLI 素材/TLS/额度自检重新通过。
+
+用户曾在初始提交用真实鼠标确认人物拖动、松手后的气泡跟随及透明区域点击正常；该人工反馈不冒充本轮阈值修复后的重复验收。本轮另重跑实际 Qt/X11 窗口与输入区域采样，未重复人工鼠标或打包验收。niri 本轮只做入口与适配单元回归，未在 niri 实机重复验收；Windows `app/` 和构建脚本未修改，也未声称完成 Windows 实机回归。
 
 按上游 issue 的核心功能清单，本轮结果如下；“未验收”与“未实现”分别列出：
 

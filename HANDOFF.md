@@ -1,12 +1,19 @@
 # 项目交接要点
 
+## PR #1 review 修复（2026-10-25）
+
+- 维护者指出无条件把 Codex CLI 挂到 /tmp/bailong-codex 会破坏相邻文件查找。包装器现在始终在原路径执行；未被遮蔽的安装不重定位，CODEX_HOME 内的顶层安装子树（如 packages/）整体只读挂回原位置，保留脚本、模块与资源；/tmp 内的完整安装同理。根层 config/auth 仍只读，运行时文件仍只存在于临时 home。直接位于被遮蔽根目录的单个启动器明确拒绝，不猜测或绕过依赖。
+- KDE 原 createAlphaMask 的阈值为 128，与 DesktopPet.alpha_hit 的 12 不同。现在提取 Alpha8，通过 Pillow 的 C 层查表按 alpha >= 12 打包为 LSB 位图，仅修改 ShapeInput；不裁切视觉边缘，不在 GUI 做逐像素 Python 循环。niri 目前没有逐像素输入区域，不能称它已遵循这一阈值，本次不顺带修改 niri。
+- 修复后重新验证 190 项（Linux 适配/公告刷新 93 项）；新增合成相邻 helper/资源、配置/认证只读、运行时文件不外泄、alpha 11/12/127/128 及全部 alpha、四档 DPR 与水平翻转回归。真实 CLI 素材/TLS/额度自检重新通过。512px 位图转换 100 次微基准中位 0.383ms、最大 0.585ms，不代表整个 GUI 帧耗时。
+- 本轮重新核对 9 组实际 Qt/X11 坐标、物理输入区和关闭置顶状态，无回调异常；21.22 秒含抓图及新索引的采样中 CPU 耗时 12.11 秒、末端 RSS 329.8 MiB，不是闲置平均，也未做同负载性能对照。记录在忽略目录 work/kde-review-validation。初始提交人工鼠标确认与本轮自动/原生验证分别记录；不声称重新做过 niri/Windows 人工验收或 KDE 打包验收。下面的初始提交记录保留当时结果，不能替代本轮 review 修复验证。
+
 ## KDE 适配与独立桌面入口（2026-10-25）
 
 - KDE 变更基于 helantianshen/main 的 `3144a67`（v1.0.0 + Linux/niri 基线），只提交源码适配，未制作或发布安装包。
 - 按上游 issue #2 的隔离与验收建议整理：niri 使用独立 `run_niri.py`，KDE 使用独立 `run_kde.py`；两者固定自己的桌面，共享 Linux 生命周期。`run_linux.py` 保留自动选择和 `--desktop kde/niri` 兼容入口。Qt 在后端选定后才导入，不要把 Qt 原生 Wayland 的虚拟坐标当作 KDE 实际窗口位置。
 - `linux_app/kde.py` 使用 X Shape 的 ShapeInput 区域实现透明像素鼠标穿透，不调用 QWidget.setMask 裁切视觉透明边缘。按 DPR 生成物理像素位图，原画、变换与人物大小保持。单次事件计时器在绘制后合并更新，隐藏/同帧不重复上传。
 - Qt 6.9.2 切换置顶时可能重建 QWindow，而 QWidget.winId() 仍返回旧 ID；必须使用 windowHandle().winId() 操作 X11 资源。初轮探针因旧 ID 误报 BadWindow；改正后原生坐标、尺寸、置顶状态和命中区均已重新核对。
-- Codex CLI 现在可来自 PATH；本机独立 CLI 位于 CODEX_HOME 内，原 bubblewrap 临时 home 会遮住它。只读包装器在隐藏 home 前把实际可执行文件只读挂载到沙箱 /tmp/bailong-codex，config/auth 仍只读，运行时文件不落入真实 Codex 目录。独立合成沙箱回归核对配置不可写且运行时文件不会外泄。本机真实额度读取成功。
+- 初始提交曾把 CODEX_HOME 内的 CLI 单文件重定位到沙箱 /tmp/bailong-codex；该实现会破坏相邻运行依赖，已被上面的 review 修复替换，不得恢复。config/auth 只读及运行时隔离继续保留。
 - 桌面进程识别不再根据 CLI 父目录猜 ChatGPT 路径，而是确认同名 Electron 主程序旁的 resources/app.asar 并排除 --type 子进程，允许 CLI 与桌面程序分开安装。
 - 新建 Python 3.12.15 / PySide6 6.9.2 虚拟环境，32 个轻量素材文件逐项 SHA-256 核对。185 项回归及 app/linux_app/tools 和三个 Linux 入口编译检查通过；真实额度、Token、IPC 与公告已接通。Evernight Vista 44.0.1（Fedora 44 衍生）、x86_64、Plasma / KWin 6.7.5 Wayland、200% 缩放下实际 X11 坐标与 Qt 目标匹配，覆盖程序化移动、设置/聊天、日报、分离、胶囊往返、人物 1.0/1.4 倍及取消置顶。
 - 用户人工确认真实鼠标拖动、松手后的气泡跟随和透明区域点击正常。XTest 在本会话未送达角色，不能用注入替代该反馈；其他缩放、热插拔、多屏、长期运行和真实全屏播放器未验收。原 Linux 预览版的其他功能边界仍保留。

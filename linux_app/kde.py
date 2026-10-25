@@ -3,6 +3,20 @@ import ctypes
 from ctypes.util import find_library
 
 
+def input_bitmap(image):
+    """Pack alpha >= 12 into X11 LSB rows, matching DesktopPet.alpha_hit()."""
+    from PIL import Image
+    from PySide6.QtGui import QImage
+    alpha = image.convertToFormat(QImage.Format.Format_Alpha8)
+    values = Image.frombytes('L', (alpha.width(), alpha.height()), bytes(alpha.constBits()),
+                             'raw', 'L', alpha.bytesPerLine(), 1)
+    # Pillow applies the lookup and packs pixels in C; no per-pixel GUI loop.
+    return values.point(_ALPHA_HIT_TABLE, '1').tobytes('raw', '1;R')
+
+
+_ALPHA_HIT_TABLE = [0 if value < 12 else 255 for value in range(256)]
+
+
 class InputShape:
     """Shape only mouse input, preserving the character's soft visual alpha."""
     def __init__(self):
@@ -62,12 +76,8 @@ class InputShape:
             painter = QPainter(image)
             pet.draw_frame(painter, QRectF(pet.rect()))
             painter.end()
-        mask = image.createAlphaMask(Qt.ImageConversionFlag.ThresholdAlphaDither)
-        # X bitmaps use tightly packed LSB rows; QImage pads rows to 32 bits.
-        row = (mask.width() + 7) // 8
-        data = bytes(mask.constBits())
-        data = b''.join(data[y * mask.bytesPerLine():y * mask.bytesPerLine() + row] for y in range(mask.height()))
-        bitmap = self.x11.XCreateBitmapFromData(self.display, window, data, mask.width(), mask.height())
+        data = input_bitmap(image)
+        bitmap = self.x11.XCreateBitmapFromData(self.display, window, data, image.width(), image.height())
         if not bitmap:
             raise RuntimeError('无法创建桌宠鼠标命中区域')
         try:
