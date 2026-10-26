@@ -4,7 +4,7 @@
 
 一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前公开版本 **v1.1.1**。
 
-**[下载程序补丁安装器 1.1.1](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/tag/v1.1.0)** | [查看更新](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest) | [快速部署](docs/快速部署说明.txt) | [全部新增功能](docs/新增功能说明.txt) | [开发说明](docs/DEVELOPMENT.md) | [迭代历史](docs/迭代历史.txt)
+**[下载程序补丁安装器 1.1.1](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/tag/v1.1.1)** | [查看更新](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest) | [快速部署](docs/快速部署说明.txt) | [全部新增功能](docs/新增功能说明.txt) | [开发说明](docs/DEVELOPMENT.md) | [迭代历史](docs/迭代历史.txt)
 
 安装器不含人物动画，新用户先获得卡片程序，可在设置中下载；已有素材和设置保留。
 
