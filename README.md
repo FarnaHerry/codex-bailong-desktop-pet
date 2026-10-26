@@ -2,9 +2,9 @@
 
 ![文章海报](docs/media/cover.png)
 
-一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前公开版本 **v1.1.0**。
+一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前公开版本 **v1.1.1**。
 
-**[下载程序补丁安装器 1.1.0](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/tag/v1.1.0)** | [查看更新](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest) | [快速部署](docs/快速部署说明.txt) | [全部新增功能](docs/新增功能说明.txt) | [开发说明](docs/DEVELOPMENT.md) | [迭代历史](docs/迭代历史.txt)
+**[下载程序补丁安装器 1.1.1](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/tag/v1.1.0)** | [查看更新](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest) | [快速部署](docs/快速部署说明.txt) | [全部新增功能](docs/新增功能说明.txt) | [开发说明](docs/DEVELOPMENT.md) | [迭代历史](docs/迭代历史.txt)
 
 安装器不含人物动画，新用户先获得卡片程序，可在设置中下载；已有素材和设置保留。
 
@@ -16,6 +16,14 @@
 | macOS / Apple Silicon | [Kki1ds 的社区预览包](https://github.com/Kki1ds/codex-bailong-desktop-pet/releases/tag/v1.0.1-mac.1) | 仅 Apple Silicon 的 DMG 预览包；未公证，无应用内更新，支持范围与限制见作者说明 |
 
 社区版本由对应作者独立维护、测试和发布，安装说明与平台问题反馈请前往对应仓库。主仓库发布的安装包和更新补丁适用于 Windows x64。
+
+### v1.1.1 程序补丁
+
+- 修复长时间未打开后展开卡片、数据面板和胶囊展开正常卡片时的提前露帧。
+- 修复自动台词和点击台词被会话状态覆盖，并保留未读完成提醒。
+- 这是累计程序补丁，不含动画素材。
+
+[查看 v1.1.1 发布说明](docs/releases/v1.1.1.md)
 
 ### v1.1.0 程序补丁
 
