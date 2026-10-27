@@ -103,11 +103,13 @@ class SettingsDialog(QDialog):
         appearance=self.tab('面板与显示')
         self.section(appearance,'显示内容',None)
         self.check(appearance,'panel_detached','面板与人物分别移动')
-        for key,title in [('character_visible','显示人物'),('on_top','始终置顶'),('video_fullscreen_yield','全屏视频时让位'),('mouse_through','鼠标穿透（可从托盘恢复）'),('bubble','显示面板'),('quota_visible','显示额度和重置时间')]:
+        for key,title in [('character_visible','显示人物'),('on_top','始终置顶'),('mouse_through','鼠标穿透（可从托盘恢复）'),('bubble','显示面板'),('quota_visible','显示额度和重置时间')]:
             self.check(appearance,key,title)
-            if key=='video_fullscreen_yield':
-                note=QLabel('完成提醒确认后，视频仍全屏则继续让位；退出全屏恢复当前置顶设置。')
-                note.setWordWrap(True);note.setStyleSheet(f'font-size:11px;color:{MUTED};');appearance.addRow(note)
+        self.fullscreen_mode=SlidingSegments([('关闭','off'),('仅视频','video'),('游戏和视频','game_video')])
+        appearance.addRow('全屏时让位',self.fullscreen_mode);self.fields['fullscreen_yield_mode']=self.fullscreen_mode;self.field_tabs['fullscreen_yield_mode']=0;self.field_titles['fullscreen_yield_mode']='全屏时让位'
+        self.fullscreen_mode.currentIndexChanged.connect(lambda:self.edited('fullscreen_yield_mode'))
+        note=QLabel('只在桌宠所在屏幕被窗口真正全屏占用时生效。游戏和视频模式隐藏人物和面板，仅保留托盘额度环；不会因完成提醒重新置顶。浏览器、办公和系统窗口不会按游戏处理。')
+        note.setWordWrap(True);note.setStyleSheet(f'font-size:11px;color:{MUTED};');appearance.addRow(note)
         self.section(appearance,'卡片与快捷入口','自动模式闲置后收为胶囊；手动选择胶囊或极简后不会因新状态自动展开。')
         self.mode=SlidingSegments([('自动','auto'),('胶囊','mini'),('极简','minimal')])
         appearance.addRow('卡片显示模式',self.mode);self.fields['bubble_mode']=self.mode;self.field_tabs['bubble_mode']=0;self.field_titles['bubble_mode']='卡片显示模式'
@@ -145,6 +147,9 @@ class SettingsDialog(QDialog):
     def build_page_2(self):
         pet=self.pet
         connection=self.tab('Codex 联动')
+        self.section(connection,'额度变化提醒',None)
+        self.number(connection,'quota_decline_threshold','下降达到',1,100,1,suffix='%')
+        self.number(connection,'quota_increase_threshold','上涨达到',1,100,1,suffix='%')
         self.section(connection,'启动与退出','Windows 登录启动与随 Codex 启动相互独立；按需开启。')
         self.startup=SwitchRow('登录 Windows 时启动');connection.addRow(self.startup)
         self.field_tabs['startup']=self._building_index;self.field_titles['startup']='开机启动'
