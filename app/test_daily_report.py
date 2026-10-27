@@ -94,8 +94,20 @@ class ReportUiTests(unittest.TestCase):
             self.assertLessEqual(control.mapTo(self.r.surface,control.rect().topRight()).x(),self.r.surface.width()-8)
             self.r.dismiss();self.complete()
     def test_period_change_drops_any_outdated_page_snapshot(self):
-        self.r.open();self.complete();self.r.set_page('models')
+        self.r.open();self.complete()
+        # This test exercises cancellation of an active page transition.
+        # Hosted Windows may disable animations globally; control that input
+        # instead of assuming the runner's accessibility preference is ours.
+        with patch('settings_controls.motion_enabled',return_value=True):self.r.set_page('models')
         self.assertIsNotNone(self.r.page_fade.frame)
+        self.r.set_period('7d')
+        self.assertIsNone(self.r.page_fade.frame)
+        self.assertEqual(len(self.r.plot.series['bins']),7)
+
+    def test_period_change_with_reduced_motion_has_no_outdated_snapshot(self):
+        self.r.open();self.complete()
+        with patch('settings_controls.motion_enabled',return_value=False):self.r.set_page('models')
+        self.assertIsNone(self.r.page_fade.frame)
         self.r.set_period('7d')
         self.assertIsNone(self.r.page_fade.frame)
         self.assertEqual(len(self.r.plot.series['bins']),7)
