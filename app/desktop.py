@@ -150,6 +150,9 @@ class DesktopPet(EnhancedPet):
         if self._interactive_action and mode=='variant':mode='click'
         if not self.gate.request(mode,item,force=self._interactive_action or self._manual_action):return False
         self.sustained.cancel()
+        # Every playback/cache key must use the current physical display size.
+        # An earlier temporary native size must not survive into new actions.
+        self.frame_size=self.desired_decode_size()
         if self.player is None:self.player=StreamPlayer()
         try:
             path=self.asset_path(item)
@@ -626,8 +629,35 @@ class DesktopPet(EnhancedPet):
     def flush_status(self):
         super().flush_status();self.bubble.evaluate_mode()
 
+    def desired_decode_size(self):
+        from decode_runtime import display_decode_size
+        return display_decode_size(getattr(self,'settings',{}).get('scale',1),self.devicePixelRatioF())
+
+    def request_decode_sync(self):
+        if getattr(self,'_decode_sync_pending',False):return
+        self._decode_sync_pending=True
+        def sync():
+            self._decode_sync_pending=False
+            # Read DPI after Qt has applied the screen/resize event, rather
+            # than rejecting a request while the old metrics are still live.
+            expected=self.desired_decode_size()
+            if self.frame_size!=expected or self.player is not None and getattr(self.player,'size',expected)!=expected:self.sync_decode_size()
+        QTimer.singleShot(0,self,sync)
+
+    def watch_screen(self,screen):
+        super().watch_screen(screen)
+        def changed(*unused):
+            if getattr(self,'enhanced_ready',False):self.request_decode_sync()
+        screen.geometryChanged.connect(changed)
+        screen.logicalDotsPerInchChanged.connect(changed)
+        screen.physicalDotsPerInchChanged.connect(changed)
+
+    def ensure_on_screen(self):
+        super().ensure_on_screen()
+        if getattr(self,'enhanced_ready',False):self.request_decode_sync()
+
     def sync_decode_size(self):
-        self.frame_size=min(720,max(128,round(self.height()*(self.screen().devicePixelRatio() if self.screen() else 1))))
+        self.frame_size=self.desired_decode_size()
         if self.player is not None:
             frame=self.player.resize(self.frame_size)
             if frame is not None:
@@ -649,8 +679,8 @@ class DesktopPet(EnhancedPet):
             elif event.type()==QEvent.Type.Show and self._resume_idle:
                 self._resume_idle=False;self.idle()
         result=super().event(event)
-        if event.type()==QEvent.Type.DevicePixelRatioChange and getattr(self,'enhanced_ready',False):
-            QTimer.singleShot(0,self.sync_decode_size)
+        if event.type() in (QEvent.Type.DevicePixelRatioChange,QEvent.Type.Show,QEvent.Type.Resize) and getattr(self,'enhanced_ready',False):
+            self.request_decode_sync()
         return result
 
     def save_settings(self):
@@ -1122,7 +1152,7 @@ class DesktopPet(EnhancedPet):
             token_history_days=len(snapshot.get('history_days',{})),token_hour_slots=len(snapshot.get('hours',[])),
             mode=self.mode,action_state=self.gate.state,mouse_through=self.settings['mouse_through'],scale=self.settings['scale'],
             facing=self.walk_direction,decoder_queue=self.player.frames.qsize() if self.player else 0,first_frame_cache=len(self.player.first) if self.player else 0,
-            decode_size=self.frame_size,source_frame=self.player.frame_index if self.player else 0,quality_revision=self.manifest.get('qualityRevision',0),
+            decode_size=self.frame_size,decode_expected_size=self.desired_decode_size(),character_logical_size=[self.width(),self.height()],character_device_pixel_ratio=self.devicePixelRatioF(),frame_pixel_size=[self.frames[self.index].width(),self.frames[self.index].height()] if self.frames else None,source_frame=self.player.frame_index if self.player else 0,quality_revision=self.manifest.get('qualityRevision',0),
             status_reactions=self.settings['status_actions'],reaction_samples=self.reactions.sample_count,
             reaction_kind=self.last_reaction.kind if self.last_reaction else None,reaction_action=self.last_reaction.action_id if self.last_reaction else None,
             completion_animation_pending=self.reactions.completion is not None,

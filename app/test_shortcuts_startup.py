@@ -98,7 +98,7 @@ class StartupTests(unittest.TestCase):
     def test_enable_disable_registration_and_failed_spawn_are_reversible(self):
         exe=self.root/'versions/0.8.1-test/BailongEnhanced.exe'
         with patch.object(cs,'spawn') as launch:
-            cs.configure(True,exe);self.assertTrue(cs.enabled());self.assertIn('--watch-codex',cs.startup_path().read_text(encoding='utf-16'))
+            cs.configure(True,exe);self.assertTrue(cs.enabled());self.assertIn('--watch-codex',__import__('windows_entries').read_shortcut(cs.startup_path())['arguments'])
             launch.assert_called_once_with([str(exe),'--watch-codex'])
             cs.configure(False,exe);self.assertFalse(cs.enabled());self.assertFalse(cs.startup_path().exists())
         before=cs.preference_path().read_bytes()
@@ -108,7 +108,7 @@ class StartupTests(unittest.TestCase):
         cs.atomic(cs.preference_path(),{'enabled':True})
         cs.register(self.root/'versions/0.8.1-test/BailongEnhanced.exe')
         cs.register(self.root/'versions/0.8.2-test/BailongEnhanced.exe')
-        self.assertIn('0.8.2-test',cs.startup_path().read_text(encoding='utf-16'))
+        self.assertIn('0.8.2-test',__import__('windows_entries').read_shortcut(cs.startup_path())['target'])
         cs.register(self.root/'versions/0.8.0-test/BailongEnhanced.exe');self.assertFalse(cs.startup_path().exists())
     def test_launch_drops_stale_installer_nonce(self):
         with patch.dict(os.environ,BAILONG_DEPLOY_TOKEN='private',BAILONG_DEPLOY_RECEIPT='old'),patch.object(cs.subprocess,'Popen') as launch:

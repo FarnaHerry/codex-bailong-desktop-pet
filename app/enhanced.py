@@ -29,6 +29,7 @@ from version import VERSION
 from reset_watch import LocalResetEvidence, locally_reset, ResetTracker, fetch_feed, schedule_text, account_reset_text, SOURCE_URL, local_time
 from token_calendar import TokenUsageIndex
 from refresh_flow import RefreshCoordinator, RefreshRuns
+from hover_hints import TrayHints
 
 STATE_DIR=Path(os.environ.get('LOCALAPPDATA',str(ROOT)))/'BailongEnhanced'
 STATE_DIR.mkdir(parents=True,exist_ok=True)
@@ -325,7 +326,7 @@ class EnhancedPet(Pet):
         self.diagnostic_timer.timeout.connect(self.record_state)
         self.diagnostic_timer.start()
         self.tray=QSystemTrayIcon(self._tray_base_icon,self)
-        self.tray.setToolTip('白龙桌宠\n额度：等待更新\n点击显示面板，右键设置')
+        self.tray.setToolTip('')
         tray_menu=QMenu()
         tray_menu.addAction('显示 / 隐藏气泡',self.toggle_bubble)
         tray_menu.addAction('立即查询额度',self.quota)
@@ -334,6 +335,7 @@ class EnhancedPet(Pet):
         tray_menu.addAction('退出',self.close)
         self.tray.setContextMenu(tray_menu)
         self.tray.activated.connect(lambda reason:self.toggle_bubble() if reason==QSystemTrayIcon.ActivationReason.Trigger else None)
+        self.tray_hover=TrayHints(self.tray,self)
         self._tray_shell_enabled=monitor and os.environ.get('BAILONG_ISOLATED')!='1'
         if self._tray_shell_enabled:self.tray.show()
         self._refresh_tray_icon()
@@ -607,9 +609,14 @@ class EnhancedPet(Pet):
             self.tray.setIcon(self._tray_quota_icon(window,value,valid))
             self._tray_icon_key=key
         self._tray_quota_hint=self._tray_quota_text(window,value,valid)
-        update=self._tray_update_hint or '点击显示面板，右键设置'
-        text='白龙桌宠 '+VERSION+'\n'+self._tray_quota_hint+'\n'+update
-        if self.tray.toolTip()!=text:self.tray.setToolTip(text)
+        if self.tray.toolTip():self.tray.setToolTip('')
+        if hasattr(self,'tray_hover'):
+            name={'一周':'周','5小时':'5小时'}.get(window.get('name'),'')
+            amount=f'{value:g}%' if valid else ('待刷新' if window.get('pending') else '未知')
+            title=f'{name}额度 {amount}'
+            reset=local_time(window.get('resetsAt'))
+            self.tray_hover.set_text(title,'下次重置 '+reset if reset else '重置时间未知')
+            self.tray_hover.ensure_hook()
 
     def _maintain_tray_history(self):
         def maintain():
@@ -861,6 +868,9 @@ class EnhancedPet(Pet):
                'ring_shape':'mini_circle' if self.bubble.is_island() else 'none',
                'ring_sweep':360 if self.bubble.is_island() else 0,'ring_tilt':0,
                'token_month_total':(self.bubble.token_snapshot or {}).get('total')}
+        value['hover_hints']=dict(header_custom=True,tray_custom=True,
+            tray_hook_ready=bool(self.tray_hover.hook.hwnd),tray_hook_error=self.tray_hover.hook.error,
+            tray_watch_active=self.tray_hover.watch.isActive(),tray_native_text_empty=not bool(self.tray.toolTip()))
         return value
     def record_state(self):
         save_json(STATE_DIR/'runtime.json',self.runtime_state())
@@ -879,7 +889,7 @@ class EnhancedPet(Pet):
         if self.worker and self.worker.isRunning():
             self.worker.cancel.set()
             self.worker.wait(4000)
-        self.tray.hide()
+        self.tray_hover.close();self.tray.hide()
         if self.silent_notifier:self.silent_notifier.close()
         self.bubble.close()
         event.accept()

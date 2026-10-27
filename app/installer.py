@@ -28,46 +28,22 @@ def checked_version(root,name):
     if not (path/'BailongEnhanced.exe').is_file():raise ValueError('安装版本目录无效')
     return path
 def ps_string(value):return "'"+str(value).replace("'","''")+"'"
-def shortcut_script(exe,paths):
-    """Replace legacy launch options; fail the transaction on any COM error."""
-    script="$ErrorActionPreference='Stop'\n$s=New-Object -ComObject WScript.Shell\n"
-    script+="$paths=@("+','.join(paths)+")\n"
-    script+="foreach($p in $paths){[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($p))|Out-Null;$l=$s.CreateShortcut($p);$l.TargetPath="+ps_string(exe)+";$l.Arguments='';$l.WorkingDirectory="+ps_string(exe.parent)+";$l.IconLocation="+ps_string(str(exe)+',0')+";$l.WindowStyle=1;$l.Description='白龙桌宠增强版';$l.Save()}"
-    return script
-
-def entry_script(exe,desktop_folder=None,startmenu_folder=None,previous_root=None):
-    """Create the current named entries and retire only our managed old alias."""
-    desktop_folder=desktop_folder or "([Environment]::GetFolderPath('Desktop'))"
-    startmenu_folder=startmenu_folder or "(Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs')"
-    desktop="(Join-Path "+desktop_folder+" '白龙桌宠增强版.lnk')"
-    startmenu="(Join-Path "+startmenu_folder+" '白龙桌宠增强版.lnk')"
-    script=shortcut_script(exe,[desktop,startmenu])
-    old="(Join-Path "+desktop_folder+" '白龙桌宠.lnk')"
-    script+="\n$old="+old+";if(Test-Path -LiteralPath $old){$t=$s.CreateShortcut($old).TargetPath;$base="+ps_string(str(exe.parent.parent)+os.sep)+";if($t.StartsWith($base,[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($t) -ieq 'BailongEnhanced.exe'){Remove-Item -LiteralPath $old}}"
-    if previous_root:
-        script+="\n$old="+old+";if(Test-Path -LiteralPath $old){$t=$s.CreateShortcut($old).TargetPath;$base="+ps_string(str(Path(previous_root)/'versions')+os.sep)+";if($t.StartsWith($base,[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($t) -ieq 'BailongEnhanced.exe'){Remove-Item -LiteralPath $old}}"
-    return script
-
 def register(exe,maintenance,startup):
     import winreg
     root=exe.parent
     from storage_locations import registered_install_root
-    script=entry_script(exe,previous_root=registered_install_root())
-    result=subprocess.run(['powershell.exe','-NoProfile','-Command',script],capture_output=True,creationflags=0x08000000)
-    if result.returncode:raise OSError('创建快捷方式失败')
+    from windows_entries import install_entries,startup_entry
+    previous_root=registered_install_root()
+    install_entries(exe,previous_root=previous_root)
     startup_dir=Path(os.environ['APPDATA'])/'Microsoft/Windows/Start Menu/Programs/Startup'
-    old=startup_dir/'白龙桌宠增强版.lnk'
-    if old.exists():old.unlink()
-    vbs=startup_dir/'BailongEnhanced.vbs'
-    if startup:vbs.write_text('Set s=CreateObject("WScript.Shell")\ns.Run """'+str(exe)+'""",0,False\n',encoding='utf-16')
-    elif vbs.exists():vbs.unlink()
+    startup_entry(startup_dir/'白龙桌宠增强版.lnk',startup_dir/'BailongEnhanced.vbs',[str(exe)],startup,previous_root)
     from codex_startup import register as register_codex_startup
-    register_codex_startup(exe)
+    register_codex_startup(exe,previous_root=previous_root)
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER,r'Software\Microsoft\Windows\CurrentVersion\Uninstall\BailongEnhanced') as key:
         for name,value in dict(DisplayName='白龙桌宠增强版',DisplayVersion=exe.parent.name.split('-')[0],Publisher='本地白龙桌宠项目',InstallLocation=str(exe.parent.parent.parent),DataLocation=str(DATA),UninstallString='"'+str(maintenance)+'" --manage').items():winreg.SetValueEx(key,name,0,winreg.REG_SZ,value)
         winreg.SetValueEx(key,'NoModify',0,winreg.REG_DWORD,1)
 
-def install(payload,root=ROOT,startup=True,copy_installer=True,before_commit=None,old_running=None,populate=None,data_backup=None,data_root=None,system=None):
+def install(payload,root=ROOT,startup=False,copy_installer=True,before_commit=None,old_running=None,populate=None,data_backup=None,data_root=None,system=None):
     from deployment_state import capture_entries,restore_entries,owned_destination,atomic,recover,verify_payload,stop_version
     root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True);system=root==ROOT.resolve() if system is None else system
     recover(root,system)
@@ -124,15 +100,15 @@ def install(payload,root=ROOT,startup=True,copy_installer=True,before_commit=Non
         raise error
 
 def startup_preference(root=ROOT):
-    """New installations opt in; upgrades retain the actual Startup setting."""
+    """Fresh installs require opt-in; upgrades retain recognized Startup entries."""
     manifest=read_manifest(root)
-    if not manifest.get('current'):return True
+    if not manifest.get('current'):return False
     folder=Path(os.environ['APPDATA'])/'Microsoft/Windows/Start Menu/Programs/Startup'
-    try:
-        text=(folder/'BailongEnhanced.vbs').read_text(encoding='utf-16')
-        return str(checked_version(root,manifest['current'])/'BailongEnhanced.exe').casefold() in text.casefold()
-    except FileNotFoundError:return (folder/'白龙桌宠增强版.lnk').is_file()
-    except (OSError,UnicodeError,ValueError):return (folder/'BailongEnhanced.vbs').is_file()
+    from windows_entries import command_matches,legacy_command
+    command=[str(checked_version(root,manifest['current'])/'BailongEnhanced.exe')]
+    if (folder/'白龙桌宠增强版.lnk').exists():return command_matches(folder/'白龙桌宠增强版.lnk',command)
+    old=legacy_command(folder/'BailongEnhanced.vbs')
+    return old is not None and [os.path.normcase(x) for x in old]==[os.path.normcase(x) for x in command]
 
 def stop_existing(root=ROOT):
     """Close only running binaries inside this user's registered versions."""
@@ -217,7 +193,7 @@ class Installer(QWidget):
         location=QHBoxLayout();self.location=QLineEdit(str(ROOT));self.location.setReadOnly(True);self.location.setAccessibleName('程序安装目录');location.addWidget(self.location,1)
         self.browse=QPushButton('选择位置');self.browse.clicked.connect(self.choose_location);location.addWidget(self.browse);layout.addLayout(location)
         self.browse.setEnabled(maintenance or not self.existing)
-        self.startup=QCheckBox('登录 Windows 时自动启动');self.startup.setChecked(startup_preference());layout.addWidget(self.startup);self.startup.setVisible(not quick)
+        self.startup=QCheckBox('登录 Windows 时自动启动');self.startup.setChecked(startup_preference());layout.addWidget(self.startup);self.startup.setVisible(not quick or not self.existing)
         self.install_button=QPushButton('安装 / 升级');self.install_button.clicked.connect(self.start);layout.addWidget(self.install_button)
         self.maintenance_buttons=[]
         b=QPushButton('回退到上一安装版本');self.maintenance_buttons.append(b);b.clicked.connect(self.rollback);layout.addWidget(b);b.setVisible(not quick)

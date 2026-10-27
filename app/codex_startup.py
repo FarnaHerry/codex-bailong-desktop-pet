@@ -14,7 +14,7 @@ WATCH_FLAG='--watch-codex'
 def data_dir():return Path(os.environ['LOCALAPPDATA'])/'BailongEnhanced'
 def install_root():return __import__('storage_locations').install_root()
 def preference_path():return data_dir()/'codex-startup.json'
-def startup_path():return Path(os.environ['APPDATA'])/'Microsoft/Windows/Start Menu/Programs/Startup/BailongCodexSync.vbs'
+def startup_path():return Path(os.environ['APPDATA'])/'Microsoft/Windows/Start Menu/Programs/Startup/BailongCodexSync.lnk'
 def read_json(path):
     try:
         value=json.loads(Path(path).read_text(encoding='utf-8'))
@@ -33,16 +33,12 @@ def supports_watcher(exe):
     try:return tuple(map(int,Path(exe).parent.name.split('-')[0].split('.'))) >= (0,8,1)
     except ValueError:return False
 
-def register(exe=None):
+def register(exe=None,previous_root=None):
     """Installer calls this inside its existing recoverable entry transaction."""
     path=startup_path()
-    if not enabled() or (exe is not None and not supports_watcher(exe)):
-        path.unlink(missing_ok=True);return
     command=[str(exe)] if exe is not None else app_command()
-    command=subprocess.list2cmdline(command+[WATCH_FLAG])
-    script='Option Explicit\nDim s\nSet s=CreateObject("WScript.Shell")\ns.Run "'+command.replace('"','""')+'",0,False\n'
-    path.parent.mkdir(parents=True,exist_ok=True)
-    temp=path.with_suffix('.tmp');temp.write_text(script,encoding='utf-16');os.replace(temp,path)
+    from windows_entries import startup_entry
+    startup_entry(path,path.with_suffix('.vbs'),command+[WATCH_FLAG],enabled() and (exe is None or supports_watcher(exe)),previous_root)
 
 def ensure_watcher(executable=None):
     if enabled():
@@ -68,9 +64,10 @@ def stop_watchers(root=None):
 
 def configure(value,executable=None):
     """Keep prior preference and startup registration if the OS refuses a write."""
-    pref=preference_path();entry=startup_path()
+    pref=preference_path();entry=startup_path();legacy=entry.with_suffix('.vbs')
     before=pref.read_bytes() if pref.exists() else None
     old_entry=entry.read_bytes() if entry.exists() else None
+    old_legacy=legacy.read_bytes() if legacy.exists() else None
     try:
         atomic(pref,dict(enabled=bool(value)));register(executable)
         if value:ensure_watcher(executable)
@@ -79,6 +76,8 @@ def configure(value,executable=None):
         else:pref.write_bytes(before)
         if old_entry is None:entry.unlink(missing_ok=True)
         else:entry.write_bytes(old_entry)
+        if old_legacy is None:legacy.unlink(missing_ok=True)
+        else:legacy.write_bytes(old_legacy)
         raise
 
 def desktop_executable(path):

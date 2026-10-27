@@ -3,12 +3,13 @@ import math
 import time
 from PySide6.QtCore import Qt,QRectF,QSize,Signal,QTimer,QVariantAnimation,QEasingCurve,QAbstractAnimation
 from PySide6.QtGui import QColor,QFont,QFontMetrics,QPainter,QPen,QTextLayout,QTextOption,QIcon,QPixmap,QPolygonF,QPalette
-from PySide6.QtCore import QPointF,QObject,QEvent
-from PySide6.QtWidgets import QWidget,QLabel,QHBoxLayout,QVBoxLayout,QToolButton,QApplication,QStackedWidget,QLayout,QToolTip
+from PySide6.QtCore import QPointF,QEvent
+from PySide6.QtWidgets import QWidget,QLabel,QHBoxLayout,QVBoxLayout,QToolButton,QApplication,QStackedWidget,QLayout
 from panel_transition import PanelTransition
 from surface_morph import PANEL_RADIUS
 from status_indicator import StatusIndicator
 from refresh_indicator import RefreshButton
+from hover_hints import HeaderHints
 from pet import Bubble
 from enhanced_core import clean_text
 from typography import FONT_FAMILIES,FONT_CSS,ui_font
@@ -362,15 +363,6 @@ def source_button(parent=None,compact=False):
     button.setAccessibleName('打开 Codex Resets 第三方公告来源')
     button.clicked.connect(lambda:QDesktopServices.openUrl(QUrl(SOURCE_URL)));return button
 
-class InlineExplanationOnly(QObject):
-    """Keep accessible descriptions and inline hints, suppress native tooltip windows."""
-    def eventFilter(self,obj,event):
-        if event.type()==QEvent.Type.ToolTip and isinstance(obj,QWidget):
-            bubble=self.parent()
-            if obj is bubble or bubble.isAncestorOf(obj):
-                QToolTip.hideText();event.accept();return True
-        return False
-
 class CompactBubble(Bubble):
     reportRequested=Signal()
     quotaCompareRequested=Signal()
@@ -389,7 +381,7 @@ class CompactBubble(Bubble):
     dataBusyChanged=Signal(str,bool)
     def __init__(self,owner=None):
         super().__init__();self._owner=owner;self.setParent(owner,self.windowFlags())
-        self.report=None;self.inline_explanations=InlineExplanationOnly(self);QApplication.instance().installEventFilter(self.inline_explanations)
+        self.report=None;self.inline_explanations=HeaderHints(self);QApplication.instance().installEventFilter(self.inline_explanations)
         self.content=QWidget(self);self.content.setLayout(self.layout);self.content.setFixedWidth(268);self.content.show()
         self.setFixedWidth(268);self.layout.setContentsMargins(10,6,10,6);self.layout.setSpacing(3)
         self.layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
@@ -406,7 +398,7 @@ class CompactBubble(Bubble):
         self.refresh_button=action_button('refresh','刷新额度、Token 与重置公告',parent=self.content,hit_size=28)
         self.refresh_button.setObjectName('bubble_refresh_all');self.refresh_button.clicked.connect(self.request_refresh_all)
         self.refresh_button.hide()
-        self.token_snapshot=None;self.dashboard_page='tokens';self.deck=None;self.today_tokens_card=None;self._active_reset_key=None;self._ring_values={}
+        self.token_snapshot=None;self.dashboard_page='tokens';self.deck=None;self.quota_summary_card=None;self.today_tokens_card=None;self._active_reset_key=None;self._ring_values={}
         self.token_range='all';self.detail_tab='quota';self.details_tabs=None;self.detail_scroll={}
         self._chart_entry=False;self._plot_resume=None
         from conversation_roster import ConversationRoster
@@ -431,7 +423,7 @@ class CompactBubble(Bubble):
         self.setWindowTitle('白龙增强版 · 状态气泡');self.redraw()
     def clear(self):
         # Headers are rebuilt; the tiny task animation must keep its clock.
-        self._plot_resume=None;self.deck=None
+        self._plot_resume=None;self.deck=None;self.quota_summary_card=None;self.today_tokens_card=None
         self.shortcut_button=None
         for widget in self.content.findChildren(QWidget):
             if widget.isVisible() and type(widget).__name__=='TokenPlot' and widget.reveal.animation.state()==QAbstractAnimation.State.Running:
@@ -667,6 +659,7 @@ class CompactBubble(Bubble):
         if self.is_minimal():self._redraw_minimal();return
         if self.is_island():self._redraw_island();return
         self._last_compact_surface=None
+        self.inline_explanations.preserve_for_rebuild()
         self._redrawing=True
         if self.details_tabs:
             self.detail_scroll={key:area.verticalScrollBar().value() for key,area in self.details_tabs.areas.items()}
@@ -699,7 +692,10 @@ class CompactBubble(Bubble):
         mini.setObjectName('bubble_compact');mini.clicked.connect(lambda:self.set_mode(compact_target));row.addWidget(mini)
         button=action_button('collapse' if self.expanded else 'details','收起详情' if self.expanded else '展开完整状态、来源与重置说明',hit_size=28)
         button.clicked.connect(self.toggle_details);row.addWidget(button);self.add(header)
-        self._header=header;self._header_actions=[self.refresh_button,report_button,mini,button];self._update_header()
+        self._header=header;self._header_actions=[self.refresh_button,report_button,mini,button]
+        for target,hint in zip(self._header_actions,('刷新','数据','收起','收回' if self.expanded else '详情')):
+            target.setProperty('headerActionHint',hint)
+        self._update_header()
         if self.expanded:
             self.add(self.navigation())
             label=self.label('当前任务');label.setObjectName('detail_status_title');label.setStyleSheet(FONT_CSS+'font-size:11px;color:#706879;margin-top:3px;')
@@ -720,7 +716,7 @@ class CompactBubble(Bubble):
             container=QWidget()
             stack=QVBoxLayout(container);stack.setContentsMargins(0,0,0,0);stack.setSpacing(2)
             cards=QWidget();row=QHBoxLayout(cards);row.setContentsMargins(0,0,0,0);row.setSpacing(6);stack.addWidget(cards)
-            quota=QuotaSummary(self.windows,self.quota_caption,progress_cache=self._ring_values,anomaly=warning);quota.expand.connect(self.show_quota_details)
+            quota=QuotaSummary(self.windows,self.quota_caption,progress_cache=self._ring_values,anomaly=warning);self.quota_summary_card=quota;quota.expand.connect(self.show_quota_details)
             quota.anomalyRequested.connect(self.quotaCompareRequested.emit)
             cards.setFixedHeight(quota.height());container.setFixedHeight(quota.height()+TodayTokens.HEIGHT+2)
             quota.resetDue.connect(self._quota_reset_due);row.addWidget(quota,1)

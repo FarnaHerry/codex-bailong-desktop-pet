@@ -12,6 +12,11 @@ from token_calendar import compact_tokens
 
 DASH_HEIGHT=102
 
+def paint_deck_surface(p,rect):
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(QPen(QColor('#e3d9ed'),1));p.setBrush(QColor('#f1ebf7'));p.drawRoundedRect(rect.adjusted(3,.5,-.5,-.5),10,10)
+    p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor('#faf8fc'));p.drawRoundedRect(rect.adjusted(0,.5,-3,-3),10,10)
+
 def ring_color(window):
     if window.get('remaining') is not None and window['remaining']<=15:return QColor('#a37688')
     return GREEN if window.get('name')=='一周' else PURPLE
@@ -76,5 +81,4 @@ class CardDeck(QWidget):
         if page=='tokens' and animate:self.content.plot.begin_reveal();self.content.plot.start_reveal()
     def paintEvent(self,event):
         p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(QColor('#e3d9ed'),1));p.setBrush(QColor('#f1ebf7'));p.drawRoundedRect(QRectF(self.rect()).adjusted(3,.5,-.5,-.5),10,10)
-        p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor('#faf8fc'));p.drawRoundedRect(QRectF(self.rect()).adjusted(0,.5,-3,-3),10,10)
+        paint_deck_surface(p,QRectF(self.rect()))

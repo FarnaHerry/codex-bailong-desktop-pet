@@ -16,6 +16,13 @@ using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
+[assembly: AssemblyTitle("白龙桌宠程序安装器")]
+[assembly: AssemblyProduct("白龙桌宠增强版")]
+[assembly: AssemblyCompany("Wunsch2048")]
+[assembly: AssemblyDescription("校验离线程序包后打开安装界面；开机启动由用户选择")]
+[assembly: AssemblyVersion("@@VERSION@@.0")]
+[assembly: AssemblyFileVersion("@@VERSION@@.0")]
+
 static class ProgramPatchBootstrap {
     const string VersionNumber = "@@VERSION@@";
     const string PayloadSha = "@@PAYLOAD_SHA@@";
@@ -188,8 +195,9 @@ static class ProgramPatchBootstrap {
             if(!acquired) throw new InvalidOperationException("另一个程序补丁正在准备，请稍后重试。");
             var source=Stage(payload);
             if(probe!=null) { AtomicJson(Path.GetFullPath(probe),new {passed=true,version=VersionNumber,source=source,payloadSha256=PayloadSha});return 0; }
-            var process=Process.Start(new ProcessStartInfo {FileName=Safe(source,"BailongEnhanced.exe"),Arguments="--apply-program-update",WorkingDirectory=source,UseShellExecute=false,CreateNoWindow=true});
-            process.WaitForExit();return process.ExitCode;
+            using(var process=Process.Start(new ProcessStartInfo {FileName=Safe(source,"BailongEnhanced.exe"),Arguments="--apply-program-update",WorkingDirectory=source,UseShellExecute=false,CreateNoWindow=false,WindowStyle=ProcessWindowStyle.Normal})) {
+                process.WaitForExit();return process.ExitCode;
+            }
         } catch(Exception error) {
             if(probe!=null) AtomicJson(Path.GetFullPath(probe),new {passed=false,error=error.Message});
             else MessageBox.Show("程序补丁准备失败："+error.Message+"\n原有程序和用户数据保持可用。","程序补丁包 "+VersionNumber,MessageBoxButtons.OK,MessageBoxIcon.Error);

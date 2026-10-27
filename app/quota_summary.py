@@ -66,6 +66,11 @@ class QuotaSummary(QWidget):
         shift=self.row_shift(index)
         return QRectF(3,3+shift,self.width()-6,96) if len(self.items)==1 else QRectF(3,3+index*48+shift,self.width()-6,47)
     def row_shift(self,index):return 0
+    def value_rect(self,index):
+        single=len(self.items)==1;y=(0 if single else index*48)+self.row_shift(index)
+        rect=QRectF(10,26+y,self.width()-20,34) if single else QRectF(58,y+4,self.width()-68,24)
+        if not single and index==self.week_index and self.anomaly:rect=QRectF(28,y+4,self.alert_rect().left()-32,24)
+        return rect
     def alert_rect(self):return QRectF(self.width()-self.alert_badge.width()-7,(0 if len(self.items)==1 else (self.week_index or 0)*48)+6,self.alert_badge.width(),18)
     def resizeEvent(self,event):
         self.alert_badge.move(self.alert_rect().topLeft().toPoint())
@@ -147,9 +152,7 @@ class QuotaSummary(QWidget):
             p.drawText(QRectF(10,y+7,self.width()-20,18),Qt.AlignmentFlag.AlignVCenter,label)
             value=item['display'];color=quota_color(item) if item['low'] else INK
             p.setPen(color);p.setFont(font(28 if single else 18,True))
-            value_rect=QRectF(10,26+y,self.width()-20,34) if single else QRectF(58,y+4,self.width()-68,24)
-            if not single and index==self.week_index and self.anomaly:
-                value_rect=QRectF(28,y+4,self.alert_rect().left()-32,24)
+            value_rect=self.value_rect(index)
             # Very long custom decimal percentages remain legible and contained.
             if QFontMetrics(p.font()).horizontalAdvance(value)>value_rect.width():p.setFont(font(22 if single else 14,True))
             p.drawText(value_rect,Qt.AlignmentFlag.AlignVCenter|(Qt.AlignmentFlag.AlignLeft if single else Qt.AlignmentFlag.AlignRight),value)

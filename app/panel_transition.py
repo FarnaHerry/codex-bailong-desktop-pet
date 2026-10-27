@@ -18,6 +18,20 @@ def present_barrier():
     return result == 0
 
 
+def settle_visible(root):
+    """Settle this page, not inactive QStackedWidget/settings/report pages.
+
+    isVisibleTo ignores the deliberately hidden root used during preparation,
+    while rejecting explicitly hidden descendants and their entire subtrees.
+    """
+    widgets=[root]+[w for w in root.findChildren(QWidget) if w.isVisibleTo(root)]
+    for widget in reversed(widgets):
+        widget.ensurePolished()
+        if widget.layout():widget.layout().activate()
+    for widget in widgets:QApplication.sendPostedEvents(widget,QEvent.Type.LayoutRequest)
+    return widgets
+
+
 class TransitionCover(QWidget):
     def __init__(self,parent):
         super().__init__(parent);self.image=None;self.next_image=None;self.blend=0.
@@ -148,11 +162,7 @@ class PanelTransition(QObject):
                 # Equal-sized editor pages used to swap live widgets directly.
                 # On a long-idle backing store the first new paint could arrive
                 # one compositor frame later, exposing a blank or stale page.
-                widgets=[b.content]+b.content.findChildren(QWidget)
-                for widget in reversed(widgets):
-                    widget.ensurePolished()
-                    if widget.layout():widget.layout().activate()
-                for widget in widgets:QApplication.sendPostedEvents(widget,QEvent.Type.LayoutRequest)
+                widgets=settle_visible(b.content)
                 b.setUpdatesEnabled(bool(self._preparation_updates))
                 image=complete_frame(b)
                 if image is not None and not image.isNull():
@@ -193,23 +203,22 @@ class PanelTransition(QObject):
         self.shrinking=target.width()*target.height()<self.start_rect.width()*self.start_rect.height()
         self.animation.setDuration(SHRINK_MS if self.shrinking else EXPAND_MS)
         self.animation.setEasingCurve(QEasingCurve.Type.Linear)
-        widgets=[b.content]+b.content.findChildren(QWidget)
-        for widget in reversed(widgets):
-            widget.ensurePolished()
-            if widget.layout():widget.layout().activate()
-        for widget in widgets:QApplication.sendPostedEvents(widget,QEvent.Type.LayoutRequest)
+        widgets=settle_visible(b.content)
         # QWidget.render skips update-disabled descendants. Restore them only
         # for synchronous offscreen captures, after all posted layout work.
         # No event-loop turn or native paint is dispatched in this interval.
         b.setUpdatesEnabled(bool(self._preparation_updates))
+        shared_status=(self.old_surface is not None and self.old_surface.page==b.panel_page=='status' and
+                       self.old_surface.expanded!=bool(b.expanded) and self.old_surface.shared_bounds and not b.is_compact())
         for widget in widgets:
-            if not self.shrinking and widget.isVisibleTo(b.content) and hasattr(widget,'begin_reveal'):widget.begin_reveal()
+            if not self.shrinking and not shared_status and widget.isVisibleTo(b.content) and hasattr(widget,'begin_reveal'):widget.begin_reveal()
         ratio=b.devicePixelRatioF();size=b.content.size()
-        image=QPixmap(pixel_size(size.width(),ratio),pixel_size(size.height(),ratio));image.setDevicePixelRatio(ratio);image.fill(Qt.GlobalColor.transparent if b.is_compact() else QColor('#fcfafc'))
-        b.content.render(image,QPoint(),QRegion(),QWidget.RenderFlag.DrawChildren)
+        # Render directly over the final paper once. Rendering text against a
+        # transparent raster and then compositing it changes Qt font AA.
+        image=complete_frame(b)
         self.cover.image=image
         self.cover.next_image=None;self.cover.blend=0.
-        self.morph=SurfaceMorph(self.old_surface,SurfaceState.capture(b,target.topLeft()))
+        self.morph=SurfaceMorph(self.old_surface,SurfaceState.capture(b,target.topLeft(),frame=image,content=image))
         b.layout.setEnabled(False)
         self.frozen=[(b.layout.itemAt(i).widget(),b.layout.itemAt(i).widget().updatesEnabled()) for i in range(b.layout.count()) if b.layout.itemAt(i).widget()]
         for widget,enabled in self.frozen:widget.setUpdatesEnabled(False)

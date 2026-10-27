@@ -2,6 +2,7 @@
 import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 import unittest
+from unittest.mock import Mock
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
@@ -38,6 +39,15 @@ class TrayQuotaTests(unittest.TestCase):
         self.assertEqual(window['name'],'一周')
         self.assertEqual(value,71)
         self.assertTrue(valid)
+
+    def test_refresh_updates_custom_bubble_and_clears_native_tip(self):
+        self.pet.quota_windows=[{'name':'一周','remaining':82,'resetsAt':None},{'name':'5小时','remaining':64,'resetsAt':None}]
+        self.pet.tray=Mock();self.pet.tray.toolTip.return_value='old native text'
+        self.pet.tray_hover=Mock();self.pet._tray_icon_key=None
+        self.pet._refresh_tray_icon()
+        self.pet.tray.setToolTip.assert_called_once_with('')
+        self.pet.tray_hover.set_text.assert_called_once_with('5小时额度 64%','重置时间未知')
+        self.pet.tray_hover.ensure_hook.assert_called_once_with()
 
     def test_unknown_quota_still_produces_a_visible_icon_and_tooltip(self):
         window,value,valid=self.pet._tray_window()

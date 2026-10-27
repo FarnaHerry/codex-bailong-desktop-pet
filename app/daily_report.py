@@ -261,11 +261,8 @@ class DailyReport(QWidget):
             if frame is not None:
                 # Resolve only this report's descendants. A global flush can
                 # run unrelated card layout work during native handoff.
-                widgets=[self.scroll]+self.scroll.findChildren(QWidget)
-                for widget in reversed(widgets):
-                    widget.ensurePolished()
-                    if widget.layout():widget.layout().activate()
-                for widget in widgets:QApplication.sendPostedEvents(widget,QEvent.Type.LayoutRequest)
+                from panel_transition import settle_visible
+                settle_visible(self.scroll)
                 if self.plot:self.plot.begin_reveal()
                 target=self.page_fade.snapshot(self.scroll)
                 order=('overview','models','cycle')
