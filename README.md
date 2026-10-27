@@ -2,7 +2,7 @@
 
 ![文章海报](docs/media/cover.png)
 
-一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前公开版本 **v1.2.0**。
+一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前公开版本 **v1.2.1**。
 
 **[首次安装：程序安装器 1.1.0](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/tag/v1.1.0)** | [程序更新包](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest) | [快速部署](docs/快速部署说明.txt) | [全部新增功能](docs/新增功能说明.txt) | [开发说明](docs/DEVELOPMENT.md) | [迭代历史](docs/迭代历史.txt)
 
@@ -17,7 +17,23 @@
 
 社区版本由对应作者独立维护、测试和发布，安装说明与平台问题反馈请前往对应仓库。主仓库发布的安装包和更新补丁适用于 Windows x64。
 
-### v1.2.0 程序补丁
+### v1.2.1 程序补丁
+
+- 改善远控或屏幕缩放恢复后的角色清晰度，避免放大后仍使用低分辨率动画帧。
+- 顶栏按钮和托盘额度使用自定义悬停气泡，延迟显示、不抢焦点，数据面板不会遮挡按钮提示。
+- 正常卡片与详情中的共有模块连续移动，保留图表进度；修复多会话文字在过渡途中消失。
+- 减少重复快照绘制和隐藏页面的布局准备，保留原有防闪烁交接与高清素材。
+- 升级后的自启与 Codex 联动入口使用标准 Windows 快捷方式。旧安装器未更新，杀软反馈仍需进一步核实。
+
+[下载累计程序补丁 1.2.1](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/tag/v1.2.1) | [完整更新说明](docs/releases/v1.2.1.md)
+
+已有用户可在软件内更新，只需最新一份累计程序补丁，不重传动画。首次安装继续使用顶部有效的 1.1.0 安装器，安装后更新程序。
+
+![卡片展开与收回](docs/media/card-transition-1.2.1.gif)
+
+动图使用隔离合成数据，不作为屏幕帧率证明。
+
+### v1.2.0 程序补丁（历史）
 
 - 新增可自定义的额度涨跌提醒，默认下降 10%、上涨 15%；周额度角标显示实际变化。
 - 修复程序目录迁移就绪回执不一致，以及重启后误拆额度周期、观察量和推测总量重新开始。
