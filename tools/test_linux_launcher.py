@@ -1,16 +1,39 @@
 """验证 Linux 入口迁移与 Codex 数据目录边界"""
 from argparse import Namespace
+from contextlib import ExitStack
 from pathlib import Path
 import json
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from linux_app import launcher
 
 
 class LauncherTests(unittest.TestCase):
     """正式入口必须保留用户状态，且不能把桌宠文件写入 Codex 目录"""
+    def test_behavior_migration_then_respects_saved_switches(self):
+        """实际装配入口首次开启旧禁用项，之后保留各自开关且不启用声音"""
+        pet = Mock()
+        pet.settings = dict(random_actions=False, commentary=False, sound=True, linux_wandering_ready=True)
+        pet.apply_settings.side_effect = lambda values, save=True: pet.settings.update(values)
+        args = Namespace(desktop='niri', codex_home=Path('/unused/codex'), codex_cli=Path('/unused/cli'))
+        with ExitStack() as stack:
+            for target in ('autostart.install', 'codex_watch.install', 'live.install', 'live.start', 'ui.install', 'niri.install', 'niri.attach'):
+                stack.enter_context(patch('linux_app.' + target))
+            stack.enter_context(patch('desktop.DesktopPet', return_value=pet))
+            stack.enter_context(patch('enhanced.ResetThread'))
+            launcher.create_pet(stack, args)
+            self.assertTrue(pet.settings['random_actions'])
+            self.assertTrue(pet.settings['commentary'])
+            self.assertTrue(pet.settings['linux_behaviors_ready'])
+            for random_actions, commentary in ((False, True), (True, False), (False, False)):
+                pet.settings.update(random_actions=random_actions, commentary=commentary)
+                launcher.create_pet(stack, args)
+                self.assertEqual(pet.settings['random_actions'], random_actions)
+                self.assertEqual(pet.settings['commentary'], commentary)
+                self.assertFalse(pet.settings['sound'])
+
     def test_environment_is_separate(self):
         """真实数据源与桌宠写入目录保持独立"""
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ):

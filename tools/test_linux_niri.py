@@ -27,6 +27,21 @@ class LayoutTests(unittest.TestCase):
 
 class DragTests(unittest.TestCase):
     """全局坐标突变不得进入原来的位移累计路径"""
+    def test_missing_drag_layout_retains_last_global_origin(self):
+        """跨屏原生拖动缺少布局坐标时不能退回零点，松手后使用新坐标"""
+        from contextlib import ExitStack
+        from types import SimpleNamespace
+        from desktop import DesktopPet
+        from linux_app.niri import install
+        controller = SimpleNamespace(last=QPoint(2400, 420), actual_position=lambda: None)
+        pet = SimpleNamespace(_niri_windows=controller)
+        with ExitStack() as stack:
+            install(stack)
+            self.assertEqual(DesktopPet.pos(pet), QPoint(2400, 420))
+            self.assertEqual(DesktopPet.y(pet), 420)
+            controller.actual_position = lambda: QPoint(2150, 100)
+            self.assertEqual(DesktopPet.pos(pet), QPoint(2150, 100))
+
     def test_synthetic_release_does_not_finish_native_drag(self):
         """Qt 的模拟松手必须被忽略，离开后重新进入才结束原生拖动"""
         from types import SimpleNamespace
@@ -56,7 +71,7 @@ class DragTests(unittest.TestCase):
         event = SimpleNamespace(position=lambda: QPointF(30, 30), buttons=lambda: Qt.MouseButton.LeftButton,
                                 globalPosition=Mock(side_effect=AssertionError('不应读取虚拟全局坐标')), accept=Mock())
         handle = SimpleNamespace(startSystemMove=Mock(return_value=True))
-        pet = SimpleNamespace(_niri_windows=SimpleNamespace(opacity=SimpleNamespace(setOpacity=Mock()), reveal=SimpleNamespace(stop=Mock())), settings={}, _pointer_pressed=True, _niri_press=QPoint(10, 10),
+        pet = SimpleNamespace(_niri_windows=SimpleNamespace(surfaces=SimpleNamespace(begin_pet_drag=Mock()), opacity=SimpleNamespace(setOpacity=Mock()), reveal=SimpleNamespace(stop=Mock())), settings={}, _pointer_pressed=True, _niri_press=QPoint(10, 10),
                               windowHandle=lambda: handle, click_timer=SimpleNamespace(stop=Mock()),
                               last_click=1, drag_samples=[1], generation=0, gate=SimpleNamespace(state='idle'),
                               bubble_timer=SimpleNamespace(stop=Mock()), bubble=SimpleNamespace(hide=Mock(), size_transition=SimpleNamespace(cancel=Mock())),
@@ -72,6 +87,7 @@ class DragTests(unittest.TestCase):
             self.assertTrue(pet._niri_drag)
             pet.play.assert_called_once_with('drag', 'drag')
             pet.bubble.size_transition.cancel.assert_called_once()
+            pet._niri_windows.surfaces.begin_pet_drag.assert_called_once()
             pet.settings['no_move'] = True
             DesktopPet.mouseMoveEvent(pet, event)
             handle.startSystemMove.assert_called_once()

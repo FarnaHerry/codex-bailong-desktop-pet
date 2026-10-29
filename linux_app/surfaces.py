@@ -6,6 +6,69 @@ from PySide6.QtGui import QRegion, QPainter
 from PySide6.QtWidgets import QApplication, QWidget, QGraphicsOpacityEffect
 
 
+class DragBubble(QWidget):
+    """拖动期间以角色为父表面显示原气泡，原生位置随父表面连续更新"""
+    def __init__(self, manager):
+        flags = Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowTransparentForInput | Qt.WindowType.WindowDoesNotAcceptFocus
+        super().__init__(manager.pet, flags)
+        self.manager = manager
+        self.image = None
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.timer = QTimer(self)
+        self.timer.setInterval(100)
+        self.timer.timeout.connect(self.refresh)
+
+    def refresh(self, update_frame=True):
+        """沿用原布局和绘制；移动由父表面完成，内容刷新只在拖动交接期间运行"""
+        pet = self.manager.pet
+        bubble = pet.bubble
+        if pet.closing or not pet.isVisible() or not bubble.isVisible() or pet.settings.get('panel_detached'):
+            self.stop()
+            return
+        from surface_morph import complete_frame
+        if update_frame:
+            self.image = complete_frame(bubble)
+        # 拖动中的附着编辑页使用角色锚点和原边缘翻转规则，不继承入口留下的屏幕位置
+        positioned = bubble._editor_positioned
+        bubble._editor_positioned = False
+        try:
+            target = bubble.content_geometry()
+        finally:
+            bubble._editor_positioned = positioned
+        if bubble.panel_page != 'status':
+            bubble.move(target.topLeft())
+        point = QWidget.mapToGlobal(pet, QPoint()) + target.topLeft() - pet.pos()
+        self.setGeometry(QRect(point, target.size()))
+        self.update()
+
+    def start(self):
+        """先提交原气泡画面，再隐藏真实窗口；create 不提升兄弟控件为原生窗口"""
+        self.refresh()
+        self.create()
+        self.windowHandle().setTransientParent(self.manager.pet.windowHandle())
+        self.windowHandle().setMask(QRegion(-1, -1, 1, 1))
+        self.show()
+        self.repaint()
+        self.timer.start()
+
+    def stop(self):
+        """交接结束或角色隐藏时释放画布和刷新时钟"""
+        self.timer.stop()
+        self.hide()
+        self.image = None
+        self.destroy()
+
+    def paintEvent(self, event):
+        """透明像素保持透明，不给气泡增加背景或阴影"""
+        painter = QPainter(self)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
+        if self.image is not None:
+            painter.drawPixmap(0, 0, self.image)
+
+
 class Surfaces(QObject):
     """只管理本进程登记的气泡、日报及过渡画布"""
     def __init__(self, controller):
@@ -19,6 +82,19 @@ class Surfaces(QObject):
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self.sync)
         self.serial = 0
+        self.drag_bubble = None
+
+    def begin_pet_drag(self):
+        """仅附着且可见的气泡参与角色拖动，分离卡片保持独立"""
+        if self.pet.isVisible() and self.pet.bubble.isVisible() and not self.pet.settings.get('panel_detached'):
+            if self.drag_bubble is None:
+                self.drag_bubble = DragBubble(self)
+            self.drag_bubble.start()
+
+    def finish_pet_drag(self):
+        """真实窗口定位完成后撤销拖动画布"""
+        if self.drag_bubble is not None:
+            self.drag_bubble.stop()
 
     def bind(self, widget):
         """赋予独立原生窗口唯一标题，子控件不进入合成器定位流程"""

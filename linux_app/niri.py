@@ -28,7 +28,7 @@ class NiriWindows(QObject):
         pet.bubble.setGraphicsEffect(self.opacity)
         self.reveal = QTimer(self)
         self.reveal.setSingleShot(True)
-        self.reveal.timeout.connect(lambda: self.opacity.setOpacity(1) if not getattr(pet, '_niri_drag', False) else None)
+        self.reveal.timeout.connect(self.reveal_bubble)
         self.windows = {}
         self.workspaces = {}
         self.restored = False
@@ -48,6 +48,13 @@ class NiriWindows(QObject):
         self.stream.readyRead.connect(self.read)
         self.stream.disconnected.connect(self.disconnected)
         self.stream.connectToServer(os.environ['NIRI_SOCKET'])
+
+    def reveal_bubble(self):
+        """主气泡恢复绘制后撤销跟随画布，拖动中不提前交接"""
+        if not getattr(self.pet, '_niri_drag', False):
+            self.opacity.setOpacity(1)
+            self.pet.bubble.repaint()
+            self.surfaces.finish_pet_drag()
 
     def character(self):
         """仅定位本进程已登记的角色窗口"""
@@ -186,6 +193,7 @@ class NiriWindows(QObject):
             if event.type() == QEvent.Type.Hide:
                 self.pet._niri_drag = False
                 self.pet.cancel_pointer()
+                self.surfaces.finish_pet_drag()
         return False
 
     def disconnected(self):
@@ -222,6 +230,8 @@ class NiriWindows(QObject):
         """布局事件只保留本进程窗口；浮动窗口坐标来自合成器而非 QWidget.pos"""
         while self.stream.canReadLine():
             previous = self.actual_position()
+            if previous is not None:
+                self.last = QPoint(previous)
             event = json.loads(bytes(self.stream.readLine()))
             if 'WorkspacesChanged' in event:
                 self.workspaces = {w['id']: w.get('output') for w in event['WorkspacesChanged']['workspaces']}
@@ -239,6 +249,8 @@ class NiriWindows(QObject):
                         self.windows[identifier]['layout'] = layout
             self.restore_position()
             actual = self.actual_position()
+            if actual is not None:
+                self.last = QPoint(actual)
             if actual is not None and actual != previous:
                 self.move_waiting = False
                 self.move_timeout.stop()
@@ -259,6 +271,8 @@ class NiriWindows(QObject):
                 if self.surfaces.dragging is not self.pet.bubble:
                     self.pet.position_bubble()
             self.surfaces.sync()
+            if self.surfaces.drag_bubble is not None and self.surfaces.drag_bubble.isVisible():
+                self.surfaces.drag_bubble.refresh(update_frame=False)
 
 
 
@@ -288,6 +302,9 @@ def install(stack):
         """Python 业务逻辑读取合成器实际位置，初始化时保留 Qt 默认值"""
         controller = getattr(pet, '_niri_windows', None)
         actual = controller.actual_position() if controller else None
+        # 交互拖动会暂时撤下布局坐标，Qt 虚拟原点不能作为顶部翻转依据
+        if actual is None and controller is not None:
+            actual = controller.last
         return actual if actual is not None else original_pos(pet)
 
     def frame_geometry(pet):
@@ -362,6 +379,7 @@ def install(stack):
                 if not pet.settings.get('panel_detached'):
                     pet.bubble.size_transition.cancel()
                     pet._niri_windows.reveal.stop()
+                    pet._niri_windows.surfaces.begin_pet_drag()
                     pet._niri_windows.opacity.setOpacity(0)
                 pet.play(pet.manifest.get('dragAnimation') or pet.idles[0], 'drag')
                 pet.gate.state = 'drag'

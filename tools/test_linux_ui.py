@@ -1,11 +1,11 @@
 """Linux 新版界面适配只改变平台接入，保留上游布局与绘制"""
 from contextlib import ExitStack
-from types import SimpleNamespace
+from types import SimpleNamespace, MethodType
 from unittest.mock import Mock, patch
 import unittest
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QObject, Qt
-from PySide6.QtWidgets import QApplication, QWidget, QSystemTrayIcon, QGraphicsOpacityEffect
+from PySide6.QtWidgets import QApplication, QWidget, QSystemTrayIcon, QGraphicsOpacityEffect, QMenu
 from compact_bubble import CompactBubble
 from daily_report import DailyReport
 from desktop_settings import SettingsDialog
@@ -80,6 +80,39 @@ class LinuxUiTests(unittest.TestCase):
             self.assertFalse(hints.watch.isActive())
             hints.close()
         self.assertIs(SettingsDialog.build_page_2, original)
+
+    def test_tray_refresh_keeps_actions_and_updates_original_state(self):
+        """桌面缓存的动作不能失效，状态和命令继续来自共享菜单实现"""
+        from PySide6.QtGui import QAction
+        from desktop import DesktopPet
+        pet = QWidget()
+        pet.settings = dict(character_visible=True, bubble=True, panel_detached=False, no_move=False, wandering=True)
+        pet._desktop_hidden = False
+        pet.bubble = SimpleNamespace(bubble_mode='mini')
+        pet.tray_menu = QMenu(pet)
+        pet.build_menu = MethodType(DesktopPet.build_menu, pet)
+        pet.menu_command = MethodType(DesktopPet.menu_command, pet)
+        pet.execute_command = Mock()
+        with ExitStack() as stack:
+            ui.install(stack)
+            DesktopPet.populate_tray(pet)
+            self.assertEqual(len(pet.tray_menu.actions()), 7)
+            actions = {a.objectName(): a for a in pet.tray_menu.findChildren(QAction) if a.objectName()}
+            pet._desktop_hidden = True
+            pet.settings['character_visible'] = False
+            pet.bubble.bubble_mode = 'auto'
+            for _ in range(3):
+                DesktopPet.populate_tray(pet)
+                current = {a.objectName(): a for a in pet.tray_menu.findChildren(QAction) if a.objectName()}
+                self.assertEqual(current, actions)
+            self.assertEqual(actions['command_visible'].text(), '显示桌面组件')
+            self.assertFalse(actions['command_character'].isChecked())
+            self.assertTrue(actions['command_mode_auto'].isChecked())
+            self.assertFalse(actions['command_mode_mini'].isChecked())
+            actions['command_settings'].trigger()
+            APP.processEvents()
+            pet.execute_command.assert_called_once_with('settings', False)
+
 
     def test_transition_has_one_visible_renderer_and_unmaps_idle_helper(self):
         """准备期原窗不动，动画期仅临时画布可见，结束后没有额外窗口"""
@@ -187,6 +220,86 @@ class LinuxUiTests(unittest.TestCase):
             for child in (bubble.content, transition.cover):
                 self.assertFalse(child.testAttribute(Qt.WidgetAttribute.WA_NativeWindow))
                 self.assertIsNone(child.windowHandle())
+        manager.timer.stop()
+
+    def test_drag_editor_uses_same_anchor_regardless_of_entry_position(self):
+        """编辑页从不同入口位置拖动时均上下避让，触边返回及再次拖动使用相同锚点"""
+        pet = QWidget()
+        pet.settings = {}
+        pet.closing = False
+        pet.resize(128, 128)
+        pet.show()
+        bubble = CompactBubble(pet)
+        pet.bubble = bubble
+        bubble.panel_page = 'settings'
+        bubble._editor_positioned = True
+        bubble.show()
+        APP.processEvents()
+        controller = QObject()
+        controller.pet = pet
+        manager = surfaces.Surfaces(controller)
+        area = APP.primaryScreen().availableGeometry()
+        bubble.content.resize(200, 180)
+        low = QPoint(area.center().x(), area.bottom() - 130)
+        high = QPoint(area.center().x(), area.top() + 10)
+        with ExitStack() as stack:
+            surfaces.install(stack)
+            for initial in (QPoint(100, 100), QPoint(450, 20)):
+                pet.move(low)
+                bubble.move(initial)
+                manager.begin_pet_drag()
+                preview = manager.drag_bubble
+                for point in (low, high, low, high, low):
+                    pet.move(point)
+                    preview.refresh()
+                    expected = QPoint(point.x() + (pet.width() - bubble.content.width()) // 2,
+                                      point.y() + pet.height() + 8 if point == high else point.y() - bubble.content.height() - 8)
+                    self.assertEqual(bubble.pos(), expected)
+                    self.assertEqual(preview.pos(), QWidget.mapToGlobal(pet, QPoint()) + expected - point)
+                    self.assertTrue(bubble._editor_positioned)
+                    self.assertFalse(QRect(expected, bubble.content.size()).intersects(pet.geometry()))
+                final = QPoint(bubble.pos())
+                manager.finish_pet_drag()
+                self.assertEqual(bubble.pos(), final)
+        manager.timer.stop()
+
+    def test_drag_popup_keeps_original_layout_without_native_children(self):
+        """拖动画布复用原布局，在边缘翻转，隐藏后不保留窗口或刷新时钟"""
+        pet = QWidget()
+        pet.settings = {}
+        pet.closing = False
+        pet.resize(256, 256)
+        pet.move(200, 300)
+        pet.show()
+        bubble = CompactBubble(pet)
+        pet.bubble = bubble
+        bubble.show()
+        APP.processEvents()
+        controller = QObject()
+        controller.pet = pet
+        manager = surfaces.Surfaces(controller)
+        manager.bind(bubble)
+        with ExitStack() as stack:
+            surfaces.install(stack)
+            manager.begin_pet_drag()
+            preview = manager.drag_bubble
+            self.assertTrue(preview.isVisible())
+            self.assertTrue(preview.timer.isActive())
+            self.assertEqual(preview.windowType(), Qt.WindowType.ToolTip)
+            self.assertFalse(bubble.content.testAttribute(Qt.WidgetAttribute.WA_NativeWindow))
+            self.assertFalse(bubble.size_transition.cover.testAttribute(Qt.WidgetAttribute.WA_NativeWindow))
+            for point in (QPoint(200, 300), QPoint(0, 0)):
+                pet.move(point)
+                preview.refresh()
+                target = bubble.content_geometry()
+                expected = QWidget.mapToGlobal(pet, QPoint()) + target.topLeft() - pet.pos()
+                self.assertEqual(preview.pos(), expected)
+                self.assertEqual(preview.size(), target.size())
+            pet.settings['panel_detached'] = True
+            preview.refresh()
+            self.assertFalse(preview.isVisible())
+            self.assertFalse(preview.timer.isActive())
+            manager.finish_pet_drag()
         manager.timer.stop()
 
 

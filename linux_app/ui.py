@@ -1,5 +1,6 @@
 """保留共享界面的绘制，只连接 Linux 托盘及本机设置"""
-from PySide6.QtWidgets import QLabel
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QLabel, QMenu
 
 
 def install(stack):
@@ -7,6 +8,26 @@ def install(stack):
     from .overrides import replace
     from desktop_settings import SettingsDialog
     from hover_hints import TrayHints
+    from desktop import DesktopPet
+
+    populate = DesktopPet.populate_tray
+
+    def populate_tray(pet):
+        """DBusMenu 保持菜单项身份，展开时仅同步原菜单生成的状态"""
+        if not pet.tray_menu.actions():
+            populate(pet)
+            return
+        # 原生成器仍决定文案和勾选，不清空已被桌面端缓存的菜单树
+        template = QMenu()
+        pet.build_menu(template, tray=True)
+        states = {action.objectName(): action for action in template.findChildren(QAction) if action.objectName()}
+        for action in pet.tray_menu.findChildren(QAction):
+            source = states.get(action.objectName())
+            if source is not None:
+                action.setText(source.text())
+                action.setEnabled(source.isEnabled())
+                action.setChecked(source.isChecked())
+        template.deleteLater()
 
     build = SettingsDialog.build_page_2
 
@@ -34,3 +55,4 @@ def install(stack):
 
     stack.enter_context(replace(SettingsDialog, 'build_page_2', connection_page))
     stack.enter_context(replace(TrayHints, 'set_text', tray_text))
+    stack.enter_context(replace(DesktopPet, 'populate_tray', populate_tray))
