@@ -5,12 +5,37 @@ from pathlib import Path
 import select
 import socket
 import stat
+import subprocess
+
+
+def open_codex(session=None):
+    """在原导航工作线程中交给桌面协议处理器，不把派发成功当作已读"""
+    from desktop_services import codex_conversation_url
+    from .autostart import host_environment
+    url = codex_conversation_url(session) if session is not None else 'codex://launch'
+    env = host_environment()
+    # 外部桌面工具使用宿主 Qt，不能继承桌宠的插件目录与后端选择
+    for name in ('QT_PLUGIN_PATH', 'QML2_IMPORT_PATH', 'QT_QPA_PLATFORM', 'QT_QPA_PLATFORMTHEME'):
+        env.pop(name, None)
+    try:
+        handler = subprocess.run(['xdg-mime', 'query', 'default', 'x-scheme-handler/codex'],
+                                 capture_output=True, text=True, timeout=5, env=env)
+        if handler.returncode or not handler.stdout.strip():
+            raise OSError('未找到 Codex 链接处理器，请确认 Codex 安装已注册 codex:// 协议')
+        result = subprocess.run(['xdg-open', url], capture_output=True, text=True,
+                                timeout=8, env=env)
+    except FileNotFoundError:
+        raise OSError('缺少 xdg-mime 或 xdg-open，请安装 xdg-utils 后重试') from None
+    except subprocess.TimeoutExpired:
+        raise OSError('打开 Codex 链接超时，请检查桌面协议处理器后重试') from None
+    if result.returncode:
+        raise OSError('无法打开 Codex 链接，请检查 codex:// 协议处理器后重试')
 
 
 def install(stack, home, executable):
     """在验证进程内替换 Windows 传输及进程发现，保留原业务解析"""
     from .overrides import replace
-    import quota, codex_connection, desktop_services
+    import quota, codex_connection, desktop_services, desktop
     import msgspec
     from codex_live_status import LiveStatusReader
     wrapper = (Path(sys.executable).resolve().parent / 'linux_app/codex_readonly') if getattr(sys, 'frozen', False) else Path(__file__).with_name('codex_readonly')
@@ -21,6 +46,8 @@ def install(stack, home, executable):
     # 查询程序看见只读配置和认证文件，缓存、日志、数据库均位于临时挂载
     stack.enter_context(replace(quota, 'find_codex', lambda: str(wrapper)))
     stack.enter_context(replace(codex_connection, 'find_executable', lambda: str(executable)))
+    stack.enter_context(replace(desktop_services, 'open_codex', open_codex))
+    stack.enter_context(replace(desktop, 'open_codex', open_codex))
 
     def run(reader):
         """Unix socket 断线后重连，订阅与消息解析沿用原实现"""
@@ -68,6 +95,8 @@ def start(pet, home):
     pet.activity = ActivityThread(pet, home=home)
     pet.activity.event.connect(pet.on_activity)
     pet.activity.start()
+    # 原轮询在后台线程识别进程，关闭选项时不扫描；退出仍经过 ExitGate
+    pet.codex_timer.start()
     QTimer.singleShot(1800, pet.refresh_quota)
 
 

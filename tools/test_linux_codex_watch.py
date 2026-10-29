@@ -78,9 +78,12 @@ class WatchTests(unittest.TestCase):
         """监听入口不依赖 Qt，设置函数退出适配后恢复"""
         import codex_startup
         original=codex_startup.configure
+        original_sessions=codex_startup.desktop_sessions
         with ExitStack() as stack:
             codex_watch.install(stack,Namespace(),Path('/source'))
             self.assertIsInstance(codex_startup.configure.__self__,Autostart)
+            self.assertIs(codex_startup.desktop_sessions,codex_watch.desktop_sessions)
         self.assertIs(codex_startup.configure,original)
+        self.assertIs(codex_startup.desktop_sessions,original_sessions)
         result=subprocess.run([sys.executable,'-c','import sys; from linux_app.codex_watch import watch; assert not any(n.startswith("PySide6") for n in sys.modules)'],capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)

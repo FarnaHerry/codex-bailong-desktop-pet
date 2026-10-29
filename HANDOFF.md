@@ -1,5 +1,12 @@
 # 项目交接要点
 
+## Linux 退出联动与会话跳转（2026-10-29）
+
+- codex_watch.install 替换原 codex_startup.desktop_sessions，live.start 启动原两秒 codex_timer；沿用后台扫描、ExitGate 见过启动后连续三次缺席和设置变化重置规则，不修改 Windows app/。开关关闭时原轮询立即返回，不扫描进程。仅关闭 Codex 窗口而桌面主进程仍在时不会退出。
+- live.open_codex 经原 CodexNavigation 工作线程调用 xdg-mime/xdg-open，任务链接沿用原 UUID 校验；打开主界面用 codex://launch。本机注册为 chatgpt.desktop，当前安装包解析器确认 launch/threads 路由。无协议注册或派发失败直接报错；不修改系统关联，不启动浏览器回退，不直接确认已读。两个 open_codex 导入引用都须替换，退出上下文后恢复。
+- 冻结包向宿主派发时沿用 host_environment 恢复 LD_LIBRARY_PATH，并清除桌宠 Qt 插件目录、QML 路径和后端选择，防止 KDE 外部工具使用打包 Qt。此分支仅做环境模拟回归，未重新打包。
+- 用户确认独立真实数据诊断实例的任务名跳转和“打开 Codex”均正常。另一独立实例经真实检测器过滤合成桌面 PID，测试进程退出后 4.16 秒正常关闭（退出码 0）、释放锁并保留设置，未关闭真实 Codex。117 项回归、actionlint、编译和 diff 检查通过；未做 KDE 实机或冻结包验收。证据 work/linux-codex-integration/，诊断数据不纳入提交，尚未发布安装包。
+
 ## Linux preview.2 发布验证（2026-10-25）
 
 - 本轮重新通过 108 项回归、actionlint 和 279 个归档载荷 SHA256；源码目录用 bwrap 隐藏后，便携版与 AppImage 解压模式真实 IPC/额度/Token、位置保存恢复及正常退出通过，普通 FUSE 挂载也通过。Codex config/auth 与日常设置哈希保持不变。

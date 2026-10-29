@@ -85,9 +85,10 @@ def watch(args, root, state):
 
 
 def install(stack, args, root):
-    """把原设置页的 Codex 启动开关接到独立用户监听服务"""
+    """连接启动服务和退出检测，沿用原设置页与会话确认规则"""
     from .overrides import replace
     import codex_startup
     manager = Autostart(args, root, unit=WATCH_UNIT, flags=('--watch-codex',), immediate=True)
     stack.enter_context(replace(codex_startup, 'enabled', manager.enabled))
     stack.enter_context(replace(codex_startup, 'configure', manager.configure))
+    stack.enter_context(replace(codex_startup, 'desktop_sessions', desktop_sessions))

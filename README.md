@@ -39,7 +39,9 @@ chmod +x Bailong-1.0.0-linux-preview.2-x86_64.AppImage
 
 已接入真实额度、Token、任务 IPC 和重置公告；已适配 niri 拖动、自由走动、显示器与位置记忆、分离气泡、设置/聊天面板定位、Token 日报、展开收起和人物缩放。本机验证覆盖脱离源码启动、真实数据、跨格式位置恢复及正常退出。
 
-**当前边界**：随机动作、解说和声音仍由入口关闭；声音播放、Codex 会话跳转、聊天密钥保存、随 Codex 关闭、甩出惯性及 Windows 更新安装流程尚未适配，部分界面入口仍保留，请勿将其视为 Linux 可用功能。分离面板等复杂交互已进行初步人工验收，不等于全套跨屏、高 DPI 或长期稳定性验收；置顶及系统通知仍需完善。niri/KDE 人物输入区域已采用 `alpha >= 12`，“开机启动”和“随 Codex 启动”已接入独立 systemd 用户服务，使用步骤见 [Linux 说明](docs/LINUX.md#登录图形桌面后自启动)。两个启动开关相互独立。不要使用 Windows 更新包更新 Linux 版。
+**当前边界**：随机动作、解说和声音仍由入口关闭；声音播放、聊天密钥保存、甩出惯性及 Windows 更新安装流程尚未适配，部分界面入口仍保留，请勿将其视为 Linux 可用功能。分离面板等复杂交互已进行初步人工验收，不等于全套跨屏、高 DPI 或长期稳定性验收；置顶及系统通知仍需完善。niri/KDE 人物输入区域已采用 `alpha >= 12`，“开机启动”和“随 Codex 启动”已接入独立 systemd 用户服务，使用步骤见 [Linux 说明](docs/LINUX.md#登录图形桌面后自启动)。两个启动开关相互独立。不要使用 Windows 更新包更新 Linux 版。
+
+**源码新增，尚未进入 linux-preview.2 包**：已接入“随 Codex 关闭”和会话跳转。退出沿用连续三次确认规则；会话链接交由已注册的 `codex://` 协议处理器打开，需 `xdg-utils`。点击任务名不提前清除未读提醒，详见 [Linux 说明](docs/LINUX.md#随-codex-关闭与会话跳转)。
 
 开发启动：创建独立 Python 3.12 虚拟环境并安装 `requirements-linux.txt`，然后执行 `.venv/bin/python run_linux.py`。素材准备及 PyCharm 配置见 [Linux 启动说明](docs/LINUX.md)，打包方法见[使用与构建说明](docs/LINUX_PACKAGE.md)，本次发布范围见[Linux 预览版说明](docs/releases/v1.0.0-linux-preview.2.md)。
 
