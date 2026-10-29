@@ -360,6 +360,7 @@ def install(stack):
                 pet.gate.state = 'idle'
                 pet.bubble_timer.stop()
                 if not pet.settings.get('panel_detached'):
+                    pet.bubble.size_transition.cancel()
                     pet._niri_windows.reveal.stop()
                     pet._niri_windows.opacity.setOpacity(0)
                 pet.play(pet.manifest.get('dragAnimation') or pet.idles[0], 'drag')

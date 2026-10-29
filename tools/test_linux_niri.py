@@ -59,7 +59,7 @@ class DragTests(unittest.TestCase):
         pet = SimpleNamespace(_niri_windows=SimpleNamespace(opacity=SimpleNamespace(setOpacity=Mock()), reveal=SimpleNamespace(stop=Mock())), settings={}, _pointer_pressed=True, _niri_press=QPoint(10, 10),
                               windowHandle=lambda: handle, click_timer=SimpleNamespace(stop=Mock()),
                               last_click=1, drag_samples=[1], generation=0, gate=SimpleNamespace(state='idle'),
-                              bubble_timer=SimpleNamespace(stop=Mock()), bubble=SimpleNamespace(hide=Mock()),
+                              bubble_timer=SimpleNamespace(stop=Mock()), bubble=SimpleNamespace(hide=Mock(), size_transition=SimpleNamespace(cancel=Mock())),
                               play=Mock(), manifest={'dragAnimation': 'drag'}, idles=['idle'])
         original = DesktopPet.mouseMoveEvent
         with ExitStack() as stack:
@@ -71,6 +71,7 @@ class DragTests(unittest.TestCase):
             event.accept.assert_called_once()
             self.assertTrue(pet._niri_drag)
             pet.play.assert_called_once_with('drag', 'drag')
+            pet.bubble.size_transition.cancel.assert_called_once()
             pet.settings['no_move'] = True
             DesktopPet.mouseMoveEvent(pet, event)
             handle.startSystemMove.assert_called_once()

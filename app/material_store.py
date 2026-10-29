@@ -28,12 +28,25 @@ def hash_file(path,cancel=lambda:False):
     return h.hexdigest()
 
 class MaterialStore:
-    def __init__(self,app_root,state_dir):
+    def __init__(self,app_root,state_dir,catalog_override=None):
         self._known_availability={}
         self.app_root=Path(app_root);self.state=Path(state_dir);self.base=self.app_root/'outputs/白龙桌宠素材'
-        self.cache=self.state/'materials';self.preference=self.state/'material-preferences.json'
+        from storage_locations import material_root
+        self.location_error=''
+        try:self.cache=material_root(self.state)
+        except (OSError,ValueError,KeyError,TypeError) as exc:
+            self.cache=self.state/'materials';self.location_error='动画目录配置不可读，请重新选择存储位置'
+        self.preference=self.state/'material-preferences.json'
         catalog_path=self.app_root/'app/material_catalog.json'
         self.catalog=json.loads(catalog_path.read_text(encoding='utf-8')) if catalog_path.is_file() else None
+        self.bundled_catalog=self.catalog;self.patch_previous=None
+        self.embedded_light_id=self.catalog['tiers']['light']['id'] if self.catalog else None
+        if catalog_override is None:
+            from animation_updates import load_override
+            from version import VERSION
+            overlay=load_override(VERSION,self.state,self.bundled_catalog)
+            if overlay:self.catalog=overlay['catalog'];self.patch_previous=overlay.get('previous')
+        else:self.catalog=catalog_override
         if self.catalog:
             if self.catalog.get('schema')!=1:raise MaterialError('素材目录版本不受支持')
             for tier in self.catalog['tiers'].values():
@@ -41,7 +54,10 @@ class MaterialStore:
                 for f in tier['files']:
                     checked(self.base,f['path'])
                     if not 0<f['bytes']<2**31 or len(f['sha256'])!=64:raise MaterialError('素材校验信息无效')
-        try:prefs=json.loads(self.preference.read_text(encoding='utf-8'));self.preferred=prefs['tier']
+        try:
+            prefs=json.loads(self.preference.read_text(encoding='utf-8'))
+            if not isinstance(prefs,dict):raise ValueError('画质偏好应为对象')
+            self.preferred=prefs['tier']
         except (OSError,ValueError,KeyError):prefs={};self.preferred='light'
         self.card_only=bool(prefs.get('cardOnly',False))
         if self.preferred not in ('light','hd'):self.preferred='light'
@@ -62,7 +78,7 @@ class MaterialStore:
         if tier=='light':
             embedded=self.app_root/'build/materials/light' if self.development else self.base
             spec=self.catalog['tiers']['light'] if self.catalog else None
-            if spec and all(checked(embedded,f['path']).is_file() for f in spec['files']):return embedded
+            if spec and spec['id']==self.embedded_light_id and all(checked(embedded,f['path']).is_file() for f in spec['files']):return embedded
         return checked(self.cache,tier+'/'+self.catalog['tiers'][tier]['id'])
 
     def available(self,tier):
@@ -131,11 +147,13 @@ class MaterialStore:
         self._known_availability[tier]=True
 
     def ensure(self,tier,cancel=lambda:False,progress=lambda n,t,p:None,opener=None):
+        if self.location_error:raise MaterialError(self.location_error)
         if not self.catalog:raise MaterialError('当前版本没有可切换的素材目录')
         root=self.tier_root(tier)
         if self.available(tier):self.verify(root,tier,cancel,progress);return root
         spec=self.catalog['tiers'][tier]
-        expected=f"https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/download/materials-{spec['id']}/bailong-{tier}-{spec['id']}.zip"
+        version=self.catalog.get('releaseVersion')
+        expected=(f'https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/download/v{version}/bailong-desktop-pet-{version}-animation-{tier}.zip' if version else f"https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/download/materials-{spec['id']}/bailong-{tier}-{spec['id']}.zip")
         url=spec.get('url',expected)
         if url!=expected:raise MaterialError('高清素材下载地址无效')
         self.cache.mkdir(parents=True,exist_ok=True)
@@ -158,6 +176,7 @@ class MaterialStore:
                 raise MaterialError('素材服务暂时不可用，请稍后重试') from exc
             except (URLError,TimeoutError,OSError) as exc:raise MaterialError('素材下载连接失败，请稍后重试') from exc
             cancelled(cancel)
+            if spec.get('archiveSha256') and (archive.stat().st_size!=spec.get('archiveBytes') or hash_file(archive,cancel)!=spec['archiveSha256']):raise MaterialError('动画补丁压缩包校验失败')
             try:
                 with zipfile.ZipFile(archive) as z:
                     expected_files={f['path']:f for f in spec['files']};infos=z.infolist()

@@ -8,6 +8,14 @@ from material_store import MaterialStore,MaterialError,checked
 from app_updates import UpdateCancelled
 
 class MaterialStoreTests(unittest.TestCase):
+    def test_non_object_preferences_do_not_break_restart_or_overwrite_source(self):
+        for value in (None,[],"hd",0):
+            with self.subTest(value=value):
+                content=json.dumps(value).encode('utf-8');self.store.preference.write_bytes(content)
+                restored=MaterialStore(self.app,self.state)
+                self.assertEqual(restored.preferred,'light')
+                self.assertEqual(restored.current,'light')
+                self.assertEqual(self.store.preference.read_bytes(),content)
     def test_cached_display_hint_does_not_authorize_corrupt_materials(self):
         root=self.store.import_hd(self.source)
         self.assertTrue(self.store.known_available('hd'))
@@ -28,7 +36,7 @@ class MaterialStoreTests(unittest.TestCase):
             self.assertTrue((Path(folder)/'BailongEnhanced/额度查询日志.jsonl').is_file())
             self.assertFalse((Path(folder)/'immutable-program').exists())
     def setUp(self):
-        self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name);self.app=self.root/'app-root';self.state=self.root/'state'
+        self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name).resolve();self.app=self.root/'app-root';self.state=self.root/'state'
         (self.app/'app').mkdir(parents=True);self.state.mkdir();self.source=self.root/'hd';self.source.mkdir()
         self.payload={'素材清单.json':b'{"character":"fixture"}','quality/action.webp':b'high-definition-fixture'}
         self.files=[dict(path=p,bytes=len(data),sha256=hashlib.sha256(data).hexdigest()) for p,data in self.payload.items()]

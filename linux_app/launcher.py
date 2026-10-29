@@ -92,6 +92,8 @@ def create_pet(stack, args):
     from . import codex_watch
     codex_watch.install(stack, args, ROOT)
     live.install(stack, args.codex_home, args.codex_cli)
+    from . import ui
+    ui.install(stack)
     if args.desktop == 'niri':
         from . import niri as windows
         windows.install(stack)
@@ -99,6 +101,9 @@ def create_pet(stack, args):
         from . import kde as windows
         windows.install(stack)
     pet = DesktopPet(monitor=False)
+    pet._tray_shell_enabled = os.environ.get('BAILONG_ISOLATED') != '1'
+    if pet._tray_shell_enabled:
+        pet.tray.show()
     pet.apply_settings(dict(random_actions=False, commentary=False, sound=False), save=False)
     # 仅迁移曾被 Linux 入口强制关闭的自由走动，之后尊重用户暂停设置
     if not pet.settings.get('linux_wandering_ready'):

@@ -33,7 +33,7 @@ class DesktopPet(EnhancedPet):
     codexPresence=Signal(object)
     connectionHealthChanged=Signal(dict)
     def __init__(self,monitor=True):
-        self._video_yielded=False;self.video_yield=None
+        self._video_yielded=False;self._fullscreen_yielded=False;self.video_yield=None
         self._desktop_hidden=False;self._card_anchor=None;self._visibility_ready=False
         self.settings_revision=0
         from codex_connection import data_home,saved_paths
@@ -68,15 +68,18 @@ class DesktopPet(EnhancedPet):
         from update_controller import UpdateController
         self.updates=UpdateController(VERSION,STATE_DIR/'updates',self,allow_auto=monitor)
         self.updates.installerReady.connect(self.install_app_update)
+        self.updates.animationReady.connect(self.queue_animation_update)
         self.updates.changed.connect(self.app_update_state)
         self._update_exit_pending=False
         from material_controller import MaterialController
         self.materials=MaterialController(self.material_store,self)
         self.materials.ready.connect(self.queue_material)
         self.materials.removeRequested.connect(self.remove_materials)
+        self.materials.rollbackRequested.connect(self.rollback_animation_update)
         self._material_exit_pending=False
         self.reactions.set_actions(item['id'] for item in all_items(self.manifest))
         self.bubble.reportRequested.connect(self.open_report)
+        self.bubble.quotaCompareRequested.connect(self.open_quota_comparison)
         self.bubble.settingsRequested.connect(self.open_settings)
         self.bubble.chatRequested.connect(self.open_chat)
         self.bubble.shortcutRequested.connect(self.open_shortcut)
@@ -108,7 +111,8 @@ class DesktopPet(EnhancedPet):
         self.codexPresence.connect(self.observe_codex_presence)
         self.codex_timer=QTimer(self);self.codex_timer.setInterval(2000);self.codex_timer.timeout.connect(self.poll_codex_presence)
         if monitor:self.codex_timer.start()
-        self.tray.setToolTip('白龙桌宠 '+VERSION+' · 点击恢复 / 右键设置')
+        self._tray_update_hint=''
+        self._refresh_tray_icon()
         self.tray.activated.disconnect()
         self.tray.activated.connect(lambda reason:self.recover() if reason in (QSystemTrayIcon.ActivationReason.Trigger,QSystemTrayIcon.ActivationReason.DoubleClick) else None)
         self.tray_menu=QMenu();self.tray_menu.aboutToShow.connect(self.populate_tray);self.tray.setContextMenu(self.tray_menu)
@@ -119,6 +123,8 @@ class DesktopPet(EnhancedPet):
         self.schedule_animation()
 
     def poll_codex_presence(self):
+        from codex_connection import is_wsl_source
+        if is_wsl_source():return
         if not self.settings.get('codex_exit') or self._codex_polling or self._codex_closing:return
         self._codex_polling=True
         def read():
@@ -144,6 +150,9 @@ class DesktopPet(EnhancedPet):
         if self._interactive_action and mode=='variant':mode='click'
         if not self.gate.request(mode,item,force=self._interactive_action or self._manual_action):return False
         self.sustained.cancel()
+        # Every playback/cache key must use the current physical display size.
+        # An earlier temporary native size must not survive into new actions.
+        self.frame_size=self.desired_decode_size()
         if self.player is None:self.player=StreamPlayer()
         try:
             path=self.asset_path(item)
@@ -576,7 +585,7 @@ class DesktopPet(EnhancedPet):
         for attr in ('wandering','random_actions','commentary','sound'):setattr(self,attr,self.settings[attr])
         self.bubble.enabled=self.settings['bubble'];self.bubble.show_quota=self.settings['quota_visible']
         self.bubble.bubble_mode=self.settings['bubble_mode']
-        if 'bubble_mode' in values:self.bubble._minimal_normal_open=False
+        if 'bubble_mode' in values:self.bubble._minimal_normal_open=False;self.bubble.auto_compact=False
         self.bubble.capsule_action=self.settings['capsule_action']
         if 'bubble_mode' in values and self.bubble._editor_origin is not None:
             self.bubble._editor_origin.update(bubble_mode=self.settings['bubble_mode'],expanded=False,
@@ -620,8 +629,35 @@ class DesktopPet(EnhancedPet):
     def flush_status(self):
         super().flush_status();self.bubble.evaluate_mode()
 
+    def desired_decode_size(self):
+        from decode_runtime import display_decode_size
+        return display_decode_size(getattr(self,'settings',{}).get('scale',1),self.devicePixelRatioF())
+
+    def request_decode_sync(self):
+        if getattr(self,'_decode_sync_pending',False):return
+        self._decode_sync_pending=True
+        def sync():
+            self._decode_sync_pending=False
+            # Read DPI after Qt has applied the screen/resize event, rather
+            # than rejecting a request while the old metrics are still live.
+            expected=self.desired_decode_size()
+            if self.frame_size!=expected or self.player is not None and getattr(self.player,'size',expected)!=expected:self.sync_decode_size()
+        QTimer.singleShot(0,self,sync)
+
+    def watch_screen(self,screen):
+        super().watch_screen(screen)
+        def changed(*unused):
+            if getattr(self,'enhanced_ready',False):self.request_decode_sync()
+        screen.geometryChanged.connect(changed)
+        screen.logicalDotsPerInchChanged.connect(changed)
+        screen.physicalDotsPerInchChanged.connect(changed)
+
+    def ensure_on_screen(self):
+        super().ensure_on_screen()
+        if getattr(self,'enhanced_ready',False):self.request_decode_sync()
+
     def sync_decode_size(self):
-        self.frame_size=min(720,max(128,round(self.height()*(self.screen().devicePixelRatio() if self.screen() else 1))))
+        self.frame_size=self.desired_decode_size()
         if self.player is not None:
             frame=self.player.resize(self.frame_size)
             if frame is not None:
@@ -643,8 +679,8 @@ class DesktopPet(EnhancedPet):
             elif event.type()==QEvent.Type.Show and self._resume_idle:
                 self._resume_idle=False;self.idle()
         result=super().event(event)
-        if event.type()==QEvent.Type.DevicePixelRatioChange and getattr(self,'enhanced_ready',False):
-            QTimer.singleShot(0,self.sync_decode_size)
+        if event.type() in (QEvent.Type.DevicePixelRatioChange,QEvent.Type.Show,QEvent.Type.Resize) and getattr(self,'enhanced_ready',False):
+            self.request_decode_sync()
         return result
 
     def save_settings(self):
@@ -667,14 +703,32 @@ class DesktopPet(EnhancedPet):
         self.move(clamp_position(QPoint(a.right()-self.width()-20,a.bottom()-self.height()-20),self.size(),a));self.remember_wander_home();self.position_bubble();self.save_settings()
     def recover(self):
         self._desktop_hidden=False;values={'mouse_through':False}
-        if not self.settings.get('character_visible',True):values['bubble']=True
+        # Recovery from the tray must be useful even when both surfaces were
+        # hidden.  Do not leave the user with a visible pet and no way to see
+        # the card they clicked the tray icon for.
+        if not self.settings.get('character_visible',True) or not self.bubble.enabled:values['bubble']=True
         self.apply_settings(values);self.apply_surface_visibility();self.bubble.redraw();self.position_bubble()
     def toggle_pet(self):
         self._desktop_hidden=not self._desktop_hidden;self.apply_surface_visibility()
+    def set_fullscreen_yield(self,hidden):
+        """Hide the desktop surfaces for the general full-screen policy.
+
+        This is intentionally separate from video z-order yielding: a video
+        completion can reclaim topmost, while the all-window policy leaves only
+        the tray ring visible until the full-screen window exits.
+        """
+        hidden=bool(hidden)
+        if hidden==self._fullscreen_yielded:return
+        self._fullscreen_yielded=hidden
+        if hidden:
+            self.stop_walk();self.throwing=False;self.cancel_pointer();self.hide();self.bubble.hide();self.tick.stop();self.pause_hidden_animation()
+        else:self.apply_surface_visibility()
     def card_surface_visible(self):
-        return not self._desktop_hidden and (self.isVisible() or not self.settings.get('character_visible',True))
+        return not self._desktop_hidden and not self._fullscreen_yielded and (self.isVisible() or not self.settings.get('character_visible',True))
     def apply_surface_visibility(self):
         if not self._visibility_ready:return
+        if self._fullscreen_yielded:
+            self.hide();self.bubble.hide();self.tick.stop();self.pause_hidden_animation();return
         character=self.settings.get('character_visible',True) and not self._desktop_hidden
         if character:
             if not self.isVisible():self.show();self.tick.start()
@@ -696,7 +750,7 @@ class DesktopPet(EnhancedPet):
         try:cx=a.left()+a.width()*max(0,min(1,float(anchor.get('rx',.8))));bottom=a.top()+a.height()*max(0,min(1,float(anchor.get('bottom',.8))))
         except (TypeError,ValueError):cx=a.right()-80;bottom=a.bottom()-40
         x=round(cx-size.width()/2);y=round(bottom-size.height())
-        reserve=self.bubble.report.reserved_height()+6 if self.bubble.report and self.bubble.report.requested else 0
+        reserve=self.bubble.report.reserved_height(size)+6 if self.bubble.report and self.bubble.report.requested else 0
         x=max(a.left(),min(x,a.right()-size.width()+1));y=max(a.top()+min(reserve,max(0,a.height()-size.height())),min(y,a.bottom()-size.height()+1))
         return QRect(x,y,size.width(),size.height())
     def move_card(self,point):
@@ -714,7 +768,7 @@ class DesktopPet(EnhancedPet):
         if self.enhanced_ready and self.bubble.panel_page!='status':self.bubble._editor_positioned=True
         if self.enhanced_ready and not self.card_surface_visible():self.bubble.hide()
     def can_raise_bubble(self):
-        if self._video_yielded or self.dragging or self.throwing or self.walking:return False
+        if self._video_yielded or self._fullscreen_yielded or self.dragging or self.throwing or self.walking:return False
         # Owned panels stay above the pet. Periodic bubble updates must not
         # reorder its sibling windows over an open settings/chat panel.
         if QApplication.activePopupWidget() is not None or self.bubble.panel_page!='status':return False
@@ -824,6 +878,15 @@ class DesktopPet(EnhancedPet):
         self.bubble.report.set_snapshot(self.bubble.token_snapshot)
         self.bubble.report.toggle()
 
+    def open_quota_comparison(self):
+        if self.bubble.report is None:
+            from daily_report import DailyReport
+            self.bubble.report=DailyReport(self.bubble)
+            self.bubble.report.refreshRequested.connect(self.refresh_report)
+        report=self.bubble.report;report.set_snapshot(self.bubble.token_snapshot)
+        report.set_page('cycle')
+        if not report.requested:report.open()
+
     def open_settings(self):
         if not self.settings_dialog:
             from desktop_settings import SettingsDialog
@@ -833,7 +896,8 @@ class DesktopPet(EnhancedPet):
     def open_status(self):
         self.show()
         if not self.bubble.enabled:self.set_option('bubble',True)
-        self.bubble.set_mode('auto')
+        if self.bubble.bubble_mode=='minimal':self.bubble.open_normal_from_minimal()
+        else:self.bubble.set_mode('auto')
     def open_chat(self):
         if not self.chat_window:
             from chat_window import ChatWindow
@@ -862,9 +926,18 @@ class DesktopPet(EnhancedPet):
         try:self.codex_navigation.open(session)
         except OSError as error:self.say(str(error),6000)
     def open_data(self):QDesktopServices.openUrl(QUrl.fromLocalFile(str(STATE_DIR)))
+    def open_install_manager(self):
+        try:
+            from installer import checked_version,read_manifest
+            from storage_locations import install_root
+            root=install_root();m=read_manifest(root)
+            exe=checked_version(root,m.get('current',''))/'白龙安装管理.exe'
+            if not exe.is_file():raise OSError('当前没有已安装的维护程序，请使用安装器选择程序位置')
+            __import__('subprocess').Popen([str(exe),'--manage'],cwd=exe.parent,creationflags=0x08000000)
+        except (OSError,ValueError) as exc:QMessageBox.warning(self.settings_dialog,'安装管理',str(exc))
     def app_update_state(self,state):
-        text='白龙桌宠 '+VERSION+(' · 有更新 '+state['latest'] if state['phase']=='available' else ' · 点击恢复 / 右键设置')
-        if self.tray.toolTip()!=text:self.tray.setToolTip(text)
+        self._tray_update_hint=('有更新 '+str(state.get('latest','')) if state.get('phase')=='available' else '')
+        self._refresh_tray_icon()
     def install_app_update(self,path):
         import subprocess
         from app_updates import cache_paths,UpdateError
@@ -933,16 +1006,36 @@ class DesktopPet(EnhancedPet):
         self._pending_material=(tier,Path(root))
         if self._desktop_hidden or not self.settings.get('character_visible',True):self.apply_material()
 
+    def queue_animation_update(self,ready):
+        if self.materials.job or self._pending_material:
+            self.updates.install_failed('素材操作正在进行，请完成后重试动画补丁');return
+        if ready['root'] is None or self.settings.get('character','builtin')!='builtin':
+            try:
+                from animation_updates import commit
+                if ready['root'] is not None:ready['store'].activate(ready['tier'],ready['root'])
+                commit(ready);self.material_store=ready['store'];self.materials.store=self.material_store
+                self.updates.animation_applied(ready);self.materials.changed.emit(self.materials.snapshot())
+            except (OSError,ValueError) as error:self.updates.install_failed(str(error))
+            return
+        self._pending_animation=ready
+        self.queue_material(ready['tier'],ready['root'])
+
+    def rollback_animation_update(self):
+        if self.materials.job or self._pending_material:return
+        self.updates.rollback_animation(self.material_store.patch_previous)
+
     def apply_material(self):
         if not self._pending_material:return False
         tier,root=self._pending_material;self._pending_material=None
+        animation=getattr(self,'_pending_animation',None);self._pending_animation=None
+        store=animation['store'] if animation else self.material_store
         old=(self.asset_root,self.manifest,self.idles,self.variants)
         try:
             m=json.loads((root/'素材清单.json').read_text(encoding='utf-8'))
             # Fully verified in the worker. Probe the entry frame before committing preference.
             from PIL import Image
             with Image.open(root/(m['idle'].get('playbackFile') or m['idle']['file'])) as im:im.load()
-            self.material_store.activate(tier,root)
+            store.activate(tier,root)
             self.sustained.cancel()
             if self.player:self.player.close()
             self.player=StreamPlayer();self.player.ended=True
@@ -953,12 +1046,19 @@ class DesktopPet(EnhancedPet):
             missing=self._materials_missing;self._materials_missing=False
             if missing:
                 self.apply_settings(dict(character_visible=True,bubble=True));self.idle()
+            if animation:
+                from animation_updates import commit
+                commit(animation);self.material_store=store;self.materials.store=store
+                self.updates.animation_applied(animation)
             self.materials.applied();return True
         except (OSError,ValueError,KeyError) as error:
             self.asset_root,self.manifest,self.idles,self.variants=old
+            if animation:self.updates.install_failed('动画补丁切换失败：'+str(error))
             self.materials.failed('画质切换失败：'+str(error));return False
     def remove_materials(self):
         from material_removal import removal_plan
+        if self.updates.job or self.updates.state['phase']=='pending':
+            self.materials.failed('请先完成当前更新');return
         if self.materials.job or self._pending_material:return
         try:plan=removal_plan(self.material_store)
         except (OSError,ValueError) as exc:self.materials.failed(str(exc));return
@@ -1024,7 +1124,7 @@ class DesktopPet(EnhancedPet):
         value.update(shared_body_tail_decode=True,nonblocking_decoder_cancel=True,adaptive_animation_clock=True,high_resolution_frame_clock=True,frame_clock_resolution=time.get_clock_info('perf_counter').resolution,idle_movement_timer_ms=1000,
             decode_runtime=STATS.snapshot(),animation_wakeups=self.animation_wakeups,movement_wakeups=self.movement_wakeups,decode_error=self.decode_error)
         value.update(material_tiers=True,material_default='light',material_current=self.material_store.current,
-            program_only_updates=True,program_update_material_verification=True,program_update_full_fallback=True,
+            program_only_updates=True,animation_only_updates=True,animation_patch_rollback=True,report_page_stable_height=True,wsl_integration=True,wsl_source=bool(getattr(self.activity,'wsl',False)),program_update_material_verification=True,program_update_full_fallback=True,
             material_resolution=(720 if self.material_store.current=='hd' else 512) if self.material_store.current else None,material_hd_cached=self.material_store.known_available('hd'),
             material_content_id=self.material_store.catalog['tiers'][self.material_store.current]['id'] if self.material_store.catalog and self.material_store.current else None,
             material_switch_pending=bool(self._pending_material))
@@ -1052,20 +1152,28 @@ class DesktopPet(EnhancedPet):
             token_history_days=len(snapshot.get('history_days',{})),token_hour_slots=len(snapshot.get('hours',[])),
             mode=self.mode,action_state=self.gate.state,mouse_through=self.settings['mouse_through'],scale=self.settings['scale'],
             facing=self.walk_direction,decoder_queue=self.player.frames.qsize() if self.player else 0,first_frame_cache=len(self.player.first) if self.player else 0,
-            decode_size=self.frame_size,source_frame=self.player.frame_index if self.player else 0,quality_revision=self.manifest.get('qualityRevision',0),
+            decode_size=self.frame_size,decode_expected_size=self.desired_decode_size(),character_logical_size=[self.width(),self.height()],character_device_pixel_ratio=self.devicePixelRatioF(),frame_pixel_size=[self.frames[self.index].width(),self.frames[self.index].height()] if self.frames else None,source_frame=self.player.frame_index if self.player else 0,quality_revision=self.manifest.get('qualityRevision',0),
             status_reactions=self.settings['status_actions'],reaction_samples=self.reactions.sample_count,
             reaction_kind=self.last_reaction.kind if self.last_reaction else None,reaction_action=self.last_reaction.action_id if self.last_reaction else None,
             completion_animation_pending=self.reactions.completion is not None,
             rss_mb=round(mem.rss/1048576,1),uptime=round(time.monotonic()-self.created_at,1),throwing=self.throwing)
         if self.connection_health.records['quota']['state']=='available' and any(w.get('resetsAt') and w['resetsAt']<=time.time() for w in self.quota_windows):
             self.connection_health.record('quota',dict(state='degraded',code='quota_expired'))
-        value['video_fullscreen_yield_enabled']=self.settings['video_fullscreen_yield']
+        value['ui_revision']=88
+        value['single_native_tray_identity']=True
+        value['isolated_shell_registration_disabled']=not getattr(self,'_tray_shell_enabled',False)
+        value['report_minimum_width']=report.MIN_WIDTH if report else 268
+        if report and report.isVisible() and not report.follow.active and not report._animating:
+            value['daily_report_aligned']=report.content_geometry()==report.geometry_for_host(self.bubble.geometry())
+        value['video_fullscreen_yield_enabled']=self.settings['fullscreen_yield_mode'] in ('video','game_video')
+        value['fullscreen_yield_mode']=self.settings.get('fullscreen_yield_mode','video')
+        value['fullscreen_window_yielding']=self._fullscreen_yielded
         value['video_fullscreen_yielding']=self._video_yielded
         value['video_detector_running']=bool(self.video_yield and self.video_yield.worker and self.video_yield.worker.is_alive())
         value['video_detection_reason']=self.video_yield.reason if self.video_yield else 'disabled'
         value['video_detection_sample']=self.video_yield.last_sample if self.video_yield else {}
         value['video_native_yield_applied']=bool(self.video_yield and self.video_yield.native_applied)
-        value['video_completion_priority']=True
+        value['video_completion_priority']=value['fullscreen_yield_mode']=='video'
         value['video_firefox_backend']='ia2_video_tag'
         value['video_completion_override']=bool(self.video_yield and self.video_yield.attention_override)
         value['connection_health']=self.connection_health.snapshot()
@@ -1083,10 +1191,14 @@ class DesktopPet(EnhancedPet):
             if not self._material_exit_pending:self._material_exit_pending=True;self.materials.idle.connect(self.close)
             event.ignore();return
         if self.settings_dialog and self.settings_dialog.path_job and self.settings_dialog.path_job.isRunning():
-            if not self.settings_dialog.path_job.wait(6500):event.ignore();return
+            if not getattr(self,'_path_exit_pending',False):
+                self._path_exit_pending=True;self.settings_dialog.path_job.finished.connect(self.close)
+            event.ignore();return
         if self.settings_dialog and self.settings_dialog.connection_job and self.settings_dialog.connection_job.isRunning():
             self.settings_dialog.connection_job.cancel.set()
-            if not self.settings_dialog.connection_job.wait(8000):event.ignore();return
+            if not getattr(self,'_connection_exit_pending',False):
+                self._connection_exit_pending=True;self.settings_dialog.connection_job.finished.connect(self.close)
+            event.ignore();return
         if self.settings_dialog and self.settings_dialog.job and self.settings_dialog.job.isRunning():
             self.say('素材导入仍在进行，请完成后退出。',5000);event.ignore();return
         if hasattr(self,'updates') and not self.updates.shutdown():

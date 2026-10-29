@@ -11,20 +11,25 @@ import time
 from pathlib import Path
 
 # Companion watcher has no GUI, Qt initialization or animation resources.
+if __name__=='__main__' and '--cleanup-storage-migration' in sys.argv:
+    from storage_locations import cleanup_main
+    raise SystemExit(cleanup_main(sys.argv[sys.argv.index('--cleanup-storage-migration')+1]))
 if __name__=='__main__' and '--watch-codex' in sys.argv:
     from codex_startup import main as watch_codex
     raise SystemExit(watch_codex())
 
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QPoint, QRectF, QUrl
-from PySide6.QtGui import QIcon, QPainter, QPixmap, QCursor, QFontDatabase, QFont, QDesktopServices
+from PySide6.QtGui import QIcon, QPainter, QPixmap, QCursor, QFontDatabase, QDesktopServices, QColor, QPen
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QProgressBar, QLabel
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 from pet import Pet, Bubble, ROOT, QuotaWorker
 from enhanced_core import RolloutTail, motion_step, clean_text, windows_from_limits
+from version import VERSION
 from reset_watch import LocalResetEvidence, locally_reset, ResetTracker, fetch_feed, schedule_text, account_reset_text, SOURCE_URL, local_time
 from token_calendar import TokenUsageIndex
 from refresh_flow import RefreshCoordinator, RefreshRuns
+from hover_hints import TrayHints
 
 STATE_DIR=Path(os.environ.get('LOCALAPPDATA',str(ROOT)))/'BailongEnhanced'
 STATE_DIR.mkdir(parents=True,exist_ok=True)
@@ -41,6 +46,9 @@ class ActivityThread(QThread):
         super().__init__(parent)
         self.stop=threading.Event()
         self.tail=RolloutTail(home)
+        from codex_connection import is_wsl_source
+        from wsl_codex import state_dir
+        self.wsl=is_wsl_source(self.tail.home);self.session_dir=state_dir(STATE_DIR,self.tail.home)
         self.token_index=TokenUsageIndex(STATE_DIR/'token-usage.sqlite3',home);self.last_token_scan=0;self.token_wake=threading.Event();self.token_reader=None
         self.week_cycle=None
         self.token_runs=RefreshRuns()
@@ -53,6 +61,9 @@ class ActivityThread(QThread):
         self.targets=ActivityTargets();self.context_lock=threading.Lock();self.displayed=();self.visited=();self.last_active_scan=-20
     def run(self):
         from codex_live_status import LiveStatusReader
+        if self.wsl:
+            from wsl_codex import LogOnlyLiveReader
+            LiveStatusReader=LogOnlyLiveReader
         self.live_reader=LiveStatusReader(self.stop,
             lambda sid,on,turn:self.live_events.put(('compacting',sid,on,turn)),
             lambda sid,reason,turn:self.live_events.put(('waiting',sid,reason,turn)),
@@ -60,6 +71,15 @@ class ActivityThread(QThread):
             lambda sid,status,turn:self.live_events.put(('terminal',sid,status,turn)))
         self.live_reader.start()
         while not self.stop.is_set():
+            if self.wsl:
+                from wsl_codex import running,unc_parts
+                if not running(unc_parts(self.tail.home)[0]):
+                    if time.monotonic()-self.last_health_scan>=10:
+                        self.last_health_scan=time.monotonic()
+                        self.event.emit(dict(kind='connection_health',capabilities={key:dict(state='unavailable',code='wsl_stopped') for key in ('tasks','completion','tokens','compaction')}))
+                    if self.token_wake.is_set() and (self.token_reader is None or not self.token_reader.is_alive()):
+                        self.token_wake.clear();self.token_reader=threading.Thread(target=self.read_tokens,name='BailongWslUnavailable',daemon=True);self.token_reader.start()
+                    self.stop.wait(1);continue
             if time.monotonic()-self.last_presence_scan>=5:
                 self.last_presence_scan=time.monotonic()
                 if self.presence_reader is None or not self.presence_reader.is_alive():
@@ -67,12 +87,12 @@ class ActivityThread(QThread):
             try:
                 from session_read_state import session_id,active_conversations,conversation_names
                 from enhanced_core import Session
-                try:pending=json.loads((STATE_DIR/'task-notifications.json').read_text(encoding='utf-8')).get('unread',[])
+                try:pending=json.loads((self.session_dir/'task-notifications.json').read_text(encoding='utf-8')).get('unread',[])
                 except (OSError,ValueError,AttributeError):pending=[]
                 pending=[k for k in pending if isinstance(k,list) and len(k)==2 and all(isinstance(v,str) for v in k)]
                 seeds=[]
                 if time.monotonic()-self.last_active_scan>=15:
-                    self.last_active_scan=time.monotonic();seeds=active_conversations(self.tail.home)
+                    self.last_active_scan=time.monotonic();seeds=[] if self.wsl else active_conversations(self.tail.home)
                     existing={session_id(s) for s in self.tail.reducer.sessions}
                     for e in seeds:
                         if session_id(e['session']) not in existing:
@@ -97,7 +117,7 @@ class ActivityThread(QThread):
                         batch.extend(apply(target,value,turn))
                 if time.monotonic()-self.last_name_scan>=3:
                     self.last_name_scan=time.monotonic()
-                    ids=self.targets.choose('names',128);names=conversation_names(self.tail.home,ids)
+                    ids=self.targets.choose('names',128);names={} if self.wsl else conversation_names(self.tail.home,ids)
                     if names:
                         self.conversation_names.update(names)
                         self.conversation_names={sid:name for sid,name in self.conversation_names.items() if sid in self.targets.entries}
@@ -150,6 +170,9 @@ class ActivityThread(QThread):
         self.event.emit({'kind':'token_busy','busy':True,'run_id':run})
         terminal=None;health=None
         try:
+            if self.wsl:
+                from wsl_codex import running,unc_parts
+                if not running(unc_parts(self.tail.home)[0]):raise RuntimeError('WSL source unavailable')
             with self.context_lock:cycle=self.week_cycle
             options=dict(stop=self.stop.is_set)
             if cycle:options['cycle']=cycle
@@ -234,7 +257,9 @@ class EnhancedPet(Pet):
         self.bubble.close()
         self.bubble.deleteLater()
         self.bubble=HeadBubble(self)
-        self.bubble.status_indicator.set_store(CONFIG.with_name('task-notifications.json'))
+        from codex_connection import session_state_dir
+        self.session_dir=session_state_dir(STATE_DIR)
+        self.bubble.status_indicator.set_store(self.session_dir/'task-notifications.json')
         self.bubble.quotaRefreshRequested.connect(self.refresh_quota)
         self.bubble.resetRefreshRequested.connect(self.refresh_reset_feed)
         self.bubble.tokenRefreshRequested.connect(self.refresh_tokens)
@@ -249,7 +274,7 @@ class EnhancedPet(Pet):
         self.sound=self.settings.get('sound',True)
         self._interaction_sound=False
         self.silent_notifier=None
-        self.local_reset_evidence=LocalResetEvidence(STATE_DIR/'local-reset-evidence.json')
+        self.local_reset_evidence=LocalResetEvidence(self.session_dir/'local-reset-evidence.json')
         self.quota_windows=[]
         self.quota_observed=0
         self.quota_source=''
@@ -278,6 +303,12 @@ class EnhancedPet(Pet):
         self.last_reset_display=''
         self.notify_history=[]
         self.enhanced_ready=True
+        # The tray icon is also the quota entry point.  Keep the last rendered
+        # key so a 120-second refresh cannot cause unnecessary icon repaints.
+        self._tray_base_icon=QIcon(str(ROOT/'app/branding/bailong.ico'))
+        self._tray_icon_key=None
+        self._tray_update_hint=''
+        self._tray_quota_hint='额度：等待更新'
         self.motion_timer=QTimer(self)
         self.motion_timer.setInterval(33)
         self.motion_timer.timeout.connect(self.motion_tick)
@@ -294,8 +325,8 @@ class EnhancedPet(Pet):
         self.diagnostic_timer.setInterval(10000)
         self.diagnostic_timer.timeout.connect(self.record_state)
         self.diagnostic_timer.start()
-        self.tray=QSystemTrayIcon(QIcon(str(ROOT/'app/branding/bailong.ico')),self)
-        self.tray.setToolTip('白龙桌宠增强版 · 双击角色查额度')
+        self.tray=QSystemTrayIcon(self._tray_base_icon,self)
+        self.tray.setToolTip('')
         tray_menu=QMenu()
         tray_menu.addAction('显示 / 隐藏气泡',self.toggle_bubble)
         tray_menu.addAction('立即查询额度',self.quota)
@@ -304,7 +335,11 @@ class EnhancedPet(Pet):
         tray_menu.addAction('退出',self.close)
         self.tray.setContextMenu(tray_menu)
         self.tray.activated.connect(lambda reason:self.toggle_bubble() if reason==QSystemTrayIcon.ActivationReason.Trigger else None)
-        self.tray.show()
+        self.tray_hover=TrayHints(self.tray,self)
+        self._tray_shell_enabled=monitor and os.environ.get('BAILONG_ISOLATED')!='1'
+        if self._tray_shell_enabled:self.tray.show()
+        self._refresh_tray_icon()
+        if self._tray_shell_enabled and sys.platform=='win32':QTimer.singleShot(3500,self._maintain_tray_history)
         pos=self.settings.get('position')
         if isinstance(pos,list) and len(pos)==2:
             self.move(self.constrained_position(QPoint(int(pos[0]),int(pos[1]))))
@@ -333,7 +368,7 @@ class EnhancedPet(Pet):
             return super().say(text,ms)
         self.bubble_timer.stop()
         self.status_hold=time.monotonic()+max(2,ms/1000 if ms else 3)
-        self.bubble.message(text)
+        self.bubble.message(text,speech=0<getattr(self,'message_priority',0)<10)
         self.position_bubble()
 
     def dismiss_bubble(self):
@@ -349,7 +384,8 @@ class EnhancedPet(Pet):
         y=self.y()-self.bubble.height()-8
         if self.y()-self.bubble.placement_height()-8<area.top():y=self.y()+self.height()+8
         x=max(area.left(),min(x,area.right()-self.bubble.width()+1))
-        reserve=self.bubble.report.reserved_height()+6 if self.bubble.report and self.bubble.report.requested else 0
+        reserve=self.bubble.report.reserved_height(self.bubble.size())+6 if self.bubble.report and self.bubble.report.requested else 0
+        reserve=min(reserve,max(0,area.height()-self.bubble.height()))
         y=max(area.top()+reserve,min(y,area.bottom()-self.bubble.height()+1))
         self.bubble.move(x,y)
         if self.bubble.enabled and self.isVisible() and self.windowFlags()&Qt.WindowType.WindowStaysOnTopHint and self.can_raise_bubble():
@@ -486,6 +522,7 @@ class EnhancedPet(Pet):
             self.bubble.quota_caption='额度暂不可用 · 双击可重试'
             self.bubble.redraw()
             self.position_bubble()
+            self._refresh_tray_icon()
         self.quota_runs.complete(run)
         self.refresh_flow.result('quota',run,False)
 
@@ -521,6 +558,77 @@ class EnhancedPet(Pet):
         self.bubble.windows=self.quota_windows
         self.bubble.redraw()
         self.position_bubble()
+        self._refresh_tray_icon()
+
+    def _tray_window(self):
+        """Return the same priority window used by the capsule quota ring."""
+        from island_widgets import selected_quota, valid_percent
+        window=selected_quota(self.quota_windows or [])
+        value=window.get('remaining')
+        valid=valid_percent(value)
+        rounded=round(float(value),1) if valid else None
+        return window,rounded,valid
+
+    def _tray_quota_text(self,window,value,valid):
+        name=str(window.get('name') or '额度')
+        if valid:
+            amount=f'{value:g}%'
+        elif window.get('pending'):
+            amount='待刷新'
+        else:
+            amount='未知'
+        reset=account_reset_text(window.get('resetsAt')).replace(' · ','，')
+        return f'{name} {amount}\n{reset}'
+
+    def _tray_quota_icon(self,window,value,valid):
+        """Draw the circular, number-free quota ring used by the tray preview."""
+        from ui_theme import TRAY_FIVE, TRAY_LOW, TRAY_WEEK, TRAY_TRACK, ISLAND
+        pixmap=QPixmap(64,64);pixmap.fill(Qt.GlobalColor.transparent)
+        painter=QPainter(pixmap);painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        ring_width=10
+        background=QColor(ISLAND);background.setAlpha(235)
+        painter.setPen(Qt.PenStyle.NoPen);painter.setBrush(background)
+        painter.drawEllipse(QRectF(1,1,62,62))
+        painter.setPen(QPen(QColor(TRAY_TRACK),ring_width,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
+        arc=QRectF(7,7,50,50);painter.drawEllipse(arc)
+        if valid:
+            name=str(window.get('name') or '')
+            if value<=15:color=QColor(TRAY_LOW)
+            elif name=='一周':color=QColor(TRAY_WEEK)
+            else:color=QColor(TRAY_FIVE)
+            painter.setPen(QPen(color,ring_width,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
+            remaining=max(0,min(100,value))
+            if remaining>0:painter.drawArc(arc,90*16,-round(360*16*remaining/100))
+        painter.end();return QIcon(pixmap)
+
+    def _refresh_tray_icon(self):
+        if not hasattr(self,'tray'):return
+        window,value,valid=self._tray_window()
+        key=(str(window.get('name') or '额度'),value,bool(window.get('pending')))
+        if key!=self._tray_icon_key:
+            self.tray.setIcon(self._tray_quota_icon(window,value,valid))
+            self._tray_icon_key=key
+        self._tray_quota_hint=self._tray_quota_text(window,value,valid)
+        if self.tray.toolTip():self.tray.setToolTip('')
+        if hasattr(self,'tray_hover'):
+            name={'一周':'周','5小时':'5小时'}.get(window.get('name'),'')
+            amount=f'{value:g}%' if valid else ('待刷新' if window.get('pending') else '未知')
+            title=f'{name}额度 {amount}'
+            reset=local_time(window.get('resetsAt'))
+            self.tray_hover.set_text(title,'下次重置 '+reset if reset else '重置时间未知')
+            self.tray_hover.ensure_hook()
+
+    def _maintain_tray_history(self):
+        def maintain():
+            try:
+                from tray_history import reconcile
+                reconcile(STATE_DIR)
+            except (OSError,ValueError,KeyError,TypeError) as error:
+                # Shell history maintenance must not break the running tray or
+                # introduce a periodic registry scan/retry loop.
+                try:save_json(STATE_DIR/'tray-history-error.json',dict(error=str(error)[:300],at=time.time()))
+                except OSError:pass
+        threading.Thread(target=maintain,name='BailongTrayHistory',daemon=True).start()
 
     def on_activity(self,event):
         kind=event.get('kind')
@@ -569,8 +677,7 @@ class EnhancedPet(Pet):
         text=event.get('display') or event.get('text','等待 Codex 新消息')
         if not self.commentary and event.get('state') in ('working','responding'):
             text='正在处理任务：'+event.get('title','Codex 对话')
-        self.bubble.status=clean_text(text,180)
-        self.bubble.refresh_status()
+        self.bubble.set_activity_text(text)
         self.position_bubble()
 
     def flush_status(self):
@@ -673,11 +780,12 @@ class EnhancedPet(Pet):
 
     def notify(self,title,text):
         self.notify_history.append({'title':title,'at':time.time()})
+        if not getattr(self,'_tray_shell_enabled',False):return
         if sys.platform=='win32':
             # Qt's showMessage has no silent option. Never fall back to an audible alert.
             try:
                 from silent_notify import SilentNotifier
-                if not self.silent_notifier:self.silent_notifier=SilentNotifier(int(self.winId()))
+                if not self.silent_notifier:self.silent_notifier=SilentNotifier()
                 self.silent_notifier.show(title,clean_text(text,120))
             except (OSError,ValueError):
                 pass  # the head bubble remains the guaranteed visible reminder
@@ -760,6 +868,9 @@ class EnhancedPet(Pet):
                'ring_shape':'mini_circle' if self.bubble.is_island() else 'none',
                'ring_sweep':360 if self.bubble.is_island() else 0,'ring_tilt':0,
                'token_month_total':(self.bubble.token_snapshot or {}).get('total')}
+        value['hover_hints']=dict(header_custom=True,tray_custom=True,
+            tray_hook_ready=bool(self.tray_hover.hook.hwnd),tray_hook_error=self.tray_hover.hook.error,
+            tray_watch_active=self.tray_hover.watch.isActive(),tray_native_text_empty=not bool(self.tray.toolTip()))
         return value
     def record_state(self):
         save_json(STATE_DIR/'runtime.json',self.runtime_state())
@@ -778,7 +889,7 @@ class EnhancedPet(Pet):
         if self.worker and self.worker.isRunning():
             self.worker.cancel.set()
             self.worker.wait(4000)
-        self.tray.hide()
+        self.tray_hover.close();self.tray.hide()
         if self.silent_notifier:self.silent_notifier.close()
         self.bubble.close()
         event.accept()

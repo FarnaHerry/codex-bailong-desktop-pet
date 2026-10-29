@@ -2,6 +2,7 @@
 import time
 
 from PySide6.QtCore import QObject, QPoint, QRect, QEvent, QTimer, Qt
+from PySide6.QtGui import QRegion, QPainter
 from PySide6.QtWidgets import QApplication, QWidget, QGraphicsOpacityEffect
 
 
@@ -123,6 +124,10 @@ class Surfaces(QObject):
             elif event.type() == QEvent.Type.Hide:
                 self.dragging = None
         if event.type() in (QEvent.Type.Show, QEvent.Type.Resize):
+            if widget.windowFlags() & Qt.WindowType.WindowTransparentForInput and widget.windowHandle():
+                # Qt 的透明输入标志不能替代 Wayland 输入区域，空 mask 又会恢复整窗命中
+                widget.windowHandle().setMask(QRegion(-1, -1, 1, 1))
+                widget.update()
             self.entries[widget]['waiting'] = None
             if not self.timer.isActive():
                 self.timer.start(0)
@@ -130,11 +135,12 @@ class Surfaces(QObject):
 
 
 def install(stack):
-    """限定三个原生表面类型的几何入口，子控件和 Windows 实现不受影响"""
+    """限定原生面板和提示的几何入口，子控件和 Windows 实现不受影响"""
     from .overrides import replace
     from compact_bubble import CompactBubble
     from daily_report import DailyReport
-    from panel_transition import NativeLanding
+    from panel_transition import NativeLanding, PanelTransition, TransitionCover
+    from hover_hints import HintBubble
 
     def bridge(widget):
         """沿父对象找到已绑定气泡，兼容延迟创建的日报与过渡画布"""
@@ -172,8 +178,16 @@ def install(stack):
         if not manager:
             return QWidget.setGeometry(widget, *args)
         rect = QRect(args[0]) if len(args) == 1 else QRect(*args)
+        if isinstance(widget, CompactBubble) and getattr(widget.size_transition, "_linux_stage", None) == "building":
+            return
         manager.move(widget, rect.topLeft())
-        QWidget.resize(widget, rect.size())
+        parent = getattr(widget, '_linux_popup_parent', None)
+        if parent is not None:
+            # xdg_popup 的锚点属于父表面，Qt 全局坐标与 niri 布局原点并不一致
+            local = QWidget.mapToGlobal(parent, QPoint()) + rect.topLeft() - parent.pos()
+            QWidget.setGeometry(widget, QRect(local, rect.size()))
+        else:
+            QWidget.resize(widget, rect.size())
 
     def screen(widget):
         """跨屏动画的边界计算使用目标屏幕，不依赖滞后的 Qt 屏幕信号"""
@@ -181,10 +195,191 @@ def install(stack):
             return QApplication.screenAt(geometry(widget).center()) or QApplication.primaryScreen()
         return QWidget.screen(widget)
 
-    for cls in (CompactBubble, DailyReport, NativeLanding):
+    for cls in (CompactBubble, DailyReport, NativeLanding, HintBubble):
         for name, method in dict(pos=pos, x=lambda w: pos(w).x(), y=lambda w: pos(w).y(), geometry=geometry,
                                  frameGeometry=geometry, move=move, setGeometry=set_geometry, screen=screen).items():
             stack.enter_context(replace(cls, name, method))
+
+    present = HintBubble.present
+
+    def present_hint(widget, title, subtitle, anchor, screen, *, card_top=None, topmost=True, owner=None):
+        """顶栏提示从 Qt 虚拟坐标换到卡片的合成器坐标，保留原绘制及窗口层级"""
+        manager = bridge(owner) if owner is not None else None
+        if manager:
+            manager.bind(widget)
+            bubble = manager.pet.bubble
+            delta = bubble.pos() - QWidget.mapToGlobal(bubble, QPoint())
+            anchor = anchor.translated(delta)
+            if card_top is not None:
+                card_top += delta.y()
+            screen = bubble.screen()
+        return present(widget, title, subtitle, anchor, screen, card_top=card_top, topmost=topmost, owner=owner)
+
+    stack.enter_context(replace(HintBubble, 'present', present_hint))
+
+    commit = PanelTransition.commit
+    finish = PanelTransition.finish
+    cancel = PanelTransition.cancel
+    release_landing = PanelTransition.release_landing
+    prepare_surface = NativeLanding.prepare
+    present_surface = NativeLanding.present
+    paint_surface = NativeLanding.paintEvent
+    paint_cover = TransitionCover.paintEvent
+    advance = PanelTransition.advance
+    release_surface = NativeLanding.release
+
+    def prepare_card_surface(widget, rect):
+        """构建目标布局时保留原窗口，临时画布稍后只定位一次"""
+        transition = widget.parentWidget().size_transition
+        if getattr(transition, '_linux_stage', None) == 'building':
+            return
+        parent = getattr(widget, '_linux_popup_parent', None)
+        kind = Qt.WindowType.ToolTip if parent is not None else Qt.WindowType.Tool
+        flags = (widget.windowFlags() & ~Qt.WindowType.WindowType_Mask) | kind
+        flags = (flags & ~Qt.WindowType.WindowStaysOnTopHint) | (transition.bubble.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
+        if widget.windowFlags() != flags:
+            widget.setWindowFlags(flags)
+        if parent is not None:
+            parent.winId()
+            # winId 会强制兄弟控件原生化，内容和遮罩必须留在气泡的绘制树内
+            widget.create()
+            widget.windowHandle().setTransientParent(parent.windowHandle())
+        prepare_surface(widget, rect)
+
+    def release_card_surface(widget):
+        """popup 隐藏后释放原生 backing store，避免多轮重映射保留帧缓冲"""
+        release_surface(widget)
+        if getattr(widget, '_linux_popup_parent', None) is not None:
+            widget.destroy()
+
+    def present_card_surface(widget, image, rect):
+        """末帧留在固定画布内，不让可见交接窗口再做原生移动"""
+        transition = widget.parentWidget().size_transition
+        if getattr(transition, '_linux_stage', None) != 'landing':
+            present_surface(widget, image, rect)
+
+    def paint_card_surface(widget, event):
+        """复用上游形变绘制，交接期间只有这一张画布呈现动画"""
+        transition = widget.parentWidget().size_transition
+        stage = getattr(transition, '_linux_stage', None)
+        if stage not in ('preparing', 'playing', 'landing'):
+            return paint_surface(widget, event)
+        painter = QPainter(widget)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        painter.fillRect(widget.rect(), Qt.GlobalColor.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        parent = getattr(widget, '_linux_popup_parent', None)
+        if parent is not None:
+            # 合成器可把 popup 推回屏幕内，绘制原点仍需与原动画的全局画布一致
+            native_origin = QWidget.mapToGlobal(widget, QPoint()) - QWidget.mapToGlobal(parent, QPoint()) + parent.pos()
+            painter.translate(widget.pos() - native_origin)
+        if stage == 'playing':
+            transition.paint_morph(painter)
+        elif stage == 'landing':
+            painter.drawPixmap(transition._linux_frame_offset, widget.image)
+
+    def paint_source_cover(widget, event):
+        """等待临时画布定位时，原窗口保持原截图和原尺寸"""
+        transition = widget.parentWidget().size_transition
+        if getattr(transition, '_linux_stage', None) != 'preparing':
+            return paint_cover(widget, event)
+        painter = QPainter(widget)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        painter.fillRect(widget.rect(), Qt.GlobalColor.transparent)
+        painter.drawPixmap(0, 0, transition.before)
+
+    def commit_transition(transition):
+        """先构建原形变，再定位空画布，避免两张胶囊分别移动"""
+        manager = bridge(transition.bubble)
+        if not manager:
+            return commit(transition)
+        transition._linux_stage = 'building'
+        commit(transition)
+        if not (transition.running and transition.canvas_morph and not transition.closing):
+            transition._linux_stage = None
+            return
+        transition.animation.pause()
+        transition._linux_stage = 'preparing'
+        transition.cover.setGeometry(transition.bubble.rect())
+        transition.cover.repaint()
+        pet = manager.pet
+        parent = pet if pet.isVisible() and pet.screen() == transition.bubble.screen() else None
+        transition.landing._linux_popup_parent = parent
+        transition.landing.prepare(transition.canvas_rect)
+        transition.landing_timer.start(0 if parent is not None else 700)
+
+    def advance_transition(transition, value):
+        """沿用原动画时钟和日报联动，只把绘制送到固定交接画布"""
+        advance(transition, value)
+        if getattr(transition, '_linux_stage', None) == 'playing':
+            transition.landing.update()
+
+    def finish_transition(transition):
+        """原窗口在不可见期间落到目标，临时画布原地保留末帧"""
+        stage = getattr(transition, '_linux_stage', None)
+        if stage not in ('preparing', 'playing') or not transition.morph:
+            return finish(transition)
+        if stage == 'preparing':
+            release_transition(transition)
+        transition._linux_stage = 'landing'
+        transition._linux_frame_offset = transition.target_rect.topLeft() - transition.canvas_rect.topLeft()
+        transition.landing.image = transition.morph.end.frame
+        transition.landing.repaint()
+        finish(transition)
+        transition.landing_timer.start(0 if getattr(transition.landing, '_linux_popup_parent', None) is not None else 700)
+
+    def release_transition(transition):
+        """准备完成时交给单一动画画布，收尾时恢复真实控件并撤销临时窗口"""
+        stage = getattr(transition, '_linux_stage', None)
+        manager = bridge(transition.bubble)
+        if stage == 'preparing':
+            transition.landing_timer.stop()
+            popup = getattr(transition.landing, '_linux_popup_parent', None) is not None
+            handle = transition.landing.windowHandle()
+            if popup and not handle.isExposed() and transition.animation.state() == transition.animation.State.Paused:
+                transition.landing_timer.start(8)
+                return
+            actual = manager.actual(transition.landing)
+            if (transition.animation.state() == transition.animation.State.Paused and actual is not None
+                    and (actual - transition.canvas_rect.topLeft()).manhattanLength() > 1):
+                transition.landing_timer.start(100)
+                return
+            transition._linux_stage = 'playing'
+            transition._linux_handoff_opacity = manager.controller.opacity.opacity()
+            manager.controller.opacity.setOpacity(0)
+            transition.landing.image = transition.before
+            transition.landing.repaint()
+            if popup:
+                # 目标窗口在原动画播放期间完成原生定位，收尾不串行等待第二段移动
+                transition.bubble.setGeometry(transition.target_rect)
+                manager.sync()
+            if transition.animation.state() == transition.animation.State.Paused:
+                transition.animation.resume()
+            return
+        transition._linux_stage = None
+        opacity = getattr(transition, '_linux_handoff_opacity', None)
+        if opacity is not None:
+            transition._linux_handoff_opacity = None
+            if not getattr(manager.pet, '_niri_drag', False):
+                manager.controller.opacity.setOpacity(opacity)
+        release_landing(transition)
+
+    def cancel_transition(transition):
+        """关闭或快速导航时同步结束交接，不遗留透明控件及额外窗口"""
+        cancel(transition)
+        release_transition(transition)
+
+    stack.enter_context(replace(NativeLanding, 'release', release_card_surface))
+    stack.enter_context(replace(NativeLanding, 'prepare', prepare_card_surface))
+    stack.enter_context(replace(NativeLanding, 'present', present_card_surface))
+    stack.enter_context(replace(NativeLanding, 'paintEvent', paint_card_surface))
+    stack.enter_context(replace(TransitionCover, 'paintEvent', paint_source_cover))
+    stack.enter_context(replace(PanelTransition, 'advance', advance_transition))
+    stack.enter_context(replace(PanelTransition, 'commit', commit_transition))
+    stack.enter_context(replace(PanelTransition, 'finish', finish_transition))
+    stack.enter_context(replace(PanelTransition, 'release_landing', release_transition))
+    stack.enter_context(replace(PanelTransition, 'cancel', cancel_transition))
 
     press = CompactBubble.card_pointer_press
     release = CompactBubble.card_pointer_release
